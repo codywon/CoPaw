@@ -1,5 +1,9 @@
 import { request } from "../request";
-import type { ChannelConfig, SingleChannelConfig } from "../types";
+import type {
+  ChannelConfig,
+  ShowToolDetailsConfig,
+  SingleChannelConfig,
+} from "../types";
 
 export const channelApi = {
   listChannelTypes: () => request<string[]>("/config/channels/types"),
@@ -25,4 +29,13 @@ export const channelApi = {
         body: JSON.stringify(body),
       },
     ),
+
+  getShowToolDetails: () =>
+    request<ShowToolDetailsConfig>("/config/show-tool-details"),
+
+  updateShowToolDetails: (showToolDetails: boolean) =>
+    request<ShowToolDetailsConfig>("/config/show-tool-details", {
+      method: "PUT",
+      body: JSON.stringify({ show_tool_details: showToolDetails }),
+    }),
 };

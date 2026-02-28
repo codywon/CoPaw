@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Form, message } from "@agentscope-ai/design";
+import { useEffect, useMemo, useState } from "react";
+import { Form, Switch, message } from "@agentscope-ai/design";
 import { useTranslation } from "react-i18next";
 
 import api from "../../../api";
@@ -17,10 +17,42 @@ function ChannelsPage() {
   const { t } = useTranslation();
   const { channels, loading, fetchChannels } = useChannels();
   const [saving, setSaving] = useState(false);
+  const [showToolDetails, setShowToolDetails] = useState(true);
+  const [loadingShowToolDetails, setLoadingShowToolDetails] = useState(true);
+  const [savingShowToolDetails, setSavingShowToolDetails] = useState(false);
   const [hoverKey, setHoverKey] = useState<ChannelKey | null>(null);
   const [activeKey, setActiveKey] = useState<ChannelKey | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [form] = Form.useForm<SingleChannelConfig>();
+
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchShowToolDetails = async () => {
+      setLoadingShowToolDetails(true);
+      try {
+        const result = await api.getShowToolDetails();
+        if (mounted) {
+          setShowToolDetails(result.show_tool_details);
+        }
+      } catch (error) {
+        console.error("Failed to load show_tool_details:", error);
+        if (mounted) {
+          message.error(t("channels.showToolDetailsLoadFailed"));
+        }
+      } finally {
+        if (mounted) {
+          setLoadingShowToolDetails(false);
+        }
+      }
+    };
+
+    void fetchShowToolDetails();
+
+    return () => {
+      mounted = false;
+    };
+  }, [t]);
 
   const cards = useMemo(() => {
     const entries: { key: ChannelKey; config: SingleChannelConfig }[] = [];
@@ -85,10 +117,44 @@ function ChannelsPage() {
 
   const activeLabel = activeKey ? CHANNEL_LABELS[activeKey] : "";
 
+  const handleToggleShowToolDetails = async (checked: boolean) => {
+    setShowToolDetails(checked);
+    setSavingShowToolDetails(true);
+    try {
+      const result = await api.updateShowToolDetails(checked);
+      setShowToolDetails(result.show_tool_details);
+      message.success(t("channels.showToolDetailsSaved"));
+    } catch (error) {
+      console.error("Failed to update show_tool_details:", error);
+      setShowToolDetails((prev) => !prev);
+      message.error(t("channels.showToolDetailsSaveFailed"));
+    } finally {
+      setSavingShowToolDetails(false);
+    }
+  };
+
   return (
     <div className={styles.channelsPage}>
       <h1 className={styles.title}>{t("channels.title")}</h1>
       <p className={styles.description}>{t("channels.description")}</p>
+      <div className={styles.settingRow}>
+        <div className={styles.settingText}>
+          <div className={styles.settingTitle}>
+            {t("channels.showToolDetails")}
+          </div>
+          <div className={styles.settingDescription}>
+            {t("channels.showToolDetailsDesc")}
+          </div>
+        </div>
+        <Switch
+          checked={showToolDetails}
+          loading={savingShowToolDetails}
+          disabled={loadingShowToolDetails}
+          onChange={(checked) => {
+            void handleToggleShowToolDetails(checked);
+          }}
+        />
+      </div>
 
       {loading ? (
         <div className={styles.loading}>

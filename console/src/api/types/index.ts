@@ -6,4 +6,5 @@ export * from "./env";
 export * from "./mcp";
 export * from "./provider";
 export * from "./skill";
+export * from "./subagents";
 export * from "./workspace";

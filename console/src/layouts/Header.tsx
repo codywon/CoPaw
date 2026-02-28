@@ -11,6 +11,7 @@ const keyToLabel: Record<string, string> = {
   "cron-jobs": "nav.cronJobs",
   skills: "nav.skills",
   mcp: "nav.mcp",
+  subagents: "nav.subagents",
   "agent-config": "nav.agentConfig",
   workspace: "nav.workspace",
   models: "nav.models",

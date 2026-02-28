@@ -16,6 +16,7 @@ import { workspaceApi } from "./modules/workspace";
 import { localModelApi } from "./modules/localModel";
 import { ollamaModelApi } from "./modules/ollamaModel";
 import { mcpApi } from "./modules/mcp";
+import { subagentsApi } from "./modules/subagents";
 
 export const api = {
   // Root
@@ -56,6 +57,9 @@ export const api = {
 
   // MCP Clients
   ...mcpApi,
+
+  // Subagents
+  ...subagentsApi,
 };
 
 export default api;

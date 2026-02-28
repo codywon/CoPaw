@@ -29,6 +29,7 @@ const keyToPath: Record<string, string> = {
   "cron-jobs": "/cron-jobs",
   skills: "/skills",
   mcp: "/mcp",
+  subagents: "/subagents",
   workspace: "/workspace",
   models: "/models",
   environments: "/environments",
@@ -111,6 +112,11 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           key: "mcp",
           label: t("nav.mcp"),
           icon: <Plug size={16} />,
+        },
+        {
+          key: "subagents",
+          label: t("nav.subagents"),
+          icon: <Settings size={16} />,
         },
         {
           key: "agent-config",

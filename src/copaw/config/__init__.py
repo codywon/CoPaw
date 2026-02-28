@@ -4,6 +4,8 @@ from .config import (
     ChannelConfig,
     ChannelConfigUnion,
     AgentsRunningConfig,
+    SubagentRoleConfig,
+    SubagentsConfig,
 )
 from .utils import (
     get_config_path,
@@ -18,6 +20,8 @@ from .utils import (
 # pylint: disable=undefined-all-variable
 __all__ = [
     "AgentsRunningConfig",
+    "SubagentRoleConfig",
+    "SubagentsConfig",
     "Config",
     "ChannelConfig",
     "ChannelConfigUnion",

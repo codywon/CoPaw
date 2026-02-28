@@ -43,6 +43,10 @@ export interface ChannelConfig {
   console: ConsoleConfig;
 }
 
+export interface ShowToolDetailsConfig {
+  show_tool_details: boolean;
+}
+
 export type SingleChannelConfig =
   | IMessageChannelConfig
   | DiscordConfig

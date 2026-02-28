@@ -14,6 +14,37 @@ from agentscope.message import TextBlock
 from copaw.constant import WORKING_DIR
 
 
+def _decode_subprocess_stream(data: bytes) -> str:
+    """Decode subprocess output bytes with robust fallback order.
+
+    Why this order:
+    - Many modern tools emit UTF-8 even on Windows.
+    - System locale (e.g. cp936/gbk) is still needed for legacy commands.
+    - gb18030/cp936 are common Chinese Windows encodings.
+    """
+    if not data:
+        return ""
+
+    preferred = (locale.getpreferredencoding(False) or "").strip()
+    candidates = ["utf-8", "utf-8-sig", preferred, "gb18030", "cp936"]
+
+    seen: set[str] = set()
+    for enc in candidates:
+        if not enc:
+            continue
+        key = enc.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+
+    fallback = preferred or "utf-8"
+    return data.decode(fallback, errors="replace")
+
+
 # pylint: disable=too-many-branches
 async def execute_shell_command(
     command: str,
@@ -58,9 +89,8 @@ async def execute_shell_command(
         try:
             await asyncio.wait_for(proc.wait(), timeout=timeout)
             stdout, stderr = await proc.communicate()
-            encoding = locale.getpreferredencoding(False) or "utf-8"
-            stdout_str = stdout.decode(encoding, errors="replace").strip("\n")
-            stderr_str = stderr.decode(encoding, errors="replace").strip("\n")
+            stdout_str = _decode_subprocess_stream(stdout).strip("\n")
+            stderr_str = _decode_subprocess_stream(stderr).strip("\n")
             returncode = proc.returncode
 
         except asyncio.TimeoutError:
@@ -83,13 +113,8 @@ async def execute_shell_command(
                     await proc.wait()
 
                 stdout, stderr = await proc.communicate()
-                encoding = locale.getpreferredencoding(False) or "utf-8"
-                stdout_str = stdout.decode(encoding, errors="replace").strip(
-                    "\n",
-                )
-                stderr_str = stderr.decode(encoding, errors="replace").strip(
-                    "\n",
-                )
+                stdout_str = _decode_subprocess_stream(stdout).strip("\n")
+                stderr_str = _decode_subprocess_stream(stderr).strip("\n")
                 if stderr_str:
                     stderr_str += f"\n{stderr_suffix}"
                 else:

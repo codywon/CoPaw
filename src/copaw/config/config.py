@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
-from typing import Optional, Union, Dict, List
+from typing import Optional, Union, Dict, List, Literal
 from pydantic import BaseModel, Field, ConfigDict
 
 from ..constant import (
@@ -119,12 +119,98 @@ class AgentsRunningConfig(BaseModel):
     )
 
 
+class SubagentToolsConfig(BaseModel):
+    """Default tools available to subagents."""
+
+    default_enabled: List[str] = Field(
+        default_factory=lambda: [
+            "read_file",
+            "write_file",
+            "edit_file",
+            "execute_shell_command",
+            "web_search",
+            "web_fetch",
+        ],
+    )
+
+
+SubagentPolicy = Literal["none", "selected", "all"]
+SubagentDispatchMode = Literal[
+    "advisory",
+    "force_when_matched",
+    "force_by_default",
+]
+SubagentRoleSelectionMode = Literal["auto", "default"]
+SubagentRolePolicy = Literal["inherit", "none", "selected", "all"]
+SubagentExecutionMode = Literal["sync", "async"]
+
+
+class SubagentRoleConfig(BaseModel):
+    """Role profile for subagent specialization."""
+
+    key: str
+    name: str
+    description: str = ""
+    identity_prompt: str = ""
+    tool_guidelines: str = ""
+    enabled: bool = True
+    routing_keywords: List[str] = Field(default_factory=list)
+    tool_allowlist: List[str] = Field(default_factory=list)
+    timeout_seconds: Optional[int] = Field(default=None, ge=1)
+    mcp_policy: SubagentRolePolicy = "inherit"
+    mcp_selected: List[str] = Field(default_factory=list)
+    skills_policy: SubagentRolePolicy = "inherit"
+    skills_selected: List[str] = Field(default_factory=list)
+
+
+class SubagentsConfig(BaseModel):
+    """Subagent orchestration behavior configuration."""
+
+    enabled: bool = False
+    max_concurrency: int = Field(default=5, ge=1)
+    default_timeout_seconds: int = Field(default=3600, ge=1)
+    hard_timeout_seconds: int = Field(default=10800, ge=1)
+    execution_mode: SubagentExecutionMode = "sync"
+    retry_max_attempts: int = Field(default=1, ge=1)
+    retry_backoff_seconds: int = Field(default=0, ge=0)
+    write_mode: Literal["worktree", "direct"] = "worktree"
+    allow_nested_spawn: bool = False
+    dispatch_mode: SubagentDispatchMode = "advisory"
+    auto_dispatch_keywords: List[str] = Field(
+        default_factory=lambda: [
+            "parallel",
+            "batch",
+            "crawl",
+            "research",
+            "collect",
+            "并行",
+            "批量",
+            "爬取",
+            "调研",
+            "采集",
+        ],
+    )
+    auto_dispatch_min_prompt_chars: int = Field(default=120, ge=1)
+    role_selection_mode: SubagentRoleSelectionMode = "auto"
+    default_role: str = ""
+    roles: List[SubagentRoleConfig] = Field(default_factory=list)
+    allowed_paths: List[str] = Field(default_factory=lambda: ["<workspace>"])
+    tools: SubagentToolsConfig = Field(default_factory=SubagentToolsConfig)
+    mcp_policy: SubagentPolicy = "selected"
+    mcp_selected: List[str] = Field(default_factory=list)
+    skills_policy: SubagentPolicy = "selected"
+    skills_selected: List[str] = Field(default_factory=list)
+
+
 class AgentsConfig(BaseModel):
     defaults: AgentsDefaultsConfig = Field(
         default_factory=AgentsDefaultsConfig,
     )
     running: AgentsRunningConfig = Field(
         default_factory=AgentsRunningConfig,
+    )
+    subagents: SubagentsConfig = Field(
+        default_factory=SubagentsConfig,
     )
     language: str = Field(
         default="zh",

@@ -90,6 +90,7 @@ def app_cmd(
         "copaw.app._app:app",
         host=host,
         port=port,
+        ws="wsproto",
         reload=reload,
         workers=workers,
         log_level=log_level,

@@ -3,6 +3,7 @@
 from typing import List
 
 from fastapi import APIRouter, Body, HTTPException, Path
+from pydantic import BaseModel
 from ...config import (
     load_config,
     save_config,
@@ -13,6 +14,12 @@ from ...config import (
 from ...constant import get_available_channels
 
 router = APIRouter(prefix="/config", tags=["config"])
+
+
+class ShowToolDetailsConfig(BaseModel):
+    """Global channel rendering option for tool call details."""
+
+    show_tool_details: bool = True
 
 
 @router.get(
@@ -121,3 +128,36 @@ async def put_channel(
     setattr(config.channels, channel_name, single_channel_config)
     save_config(config)
     return single_channel_config
+
+
+@router.get(
+    "/show-tool-details",
+    response_model=ShowToolDetailsConfig,
+    summary="Get tool detail render config",
+    description="Return whether tool execution details are shown in channels",
+)
+async def get_show_tool_details() -> ShowToolDetailsConfig:
+    """Get global show_tool_details flag."""
+    config = load_config()
+    return ShowToolDetailsConfig(
+        show_tool_details=getattr(config, "show_tool_details", True),
+    )
+
+
+@router.put(
+    "/show-tool-details",
+    response_model=ShowToolDetailsConfig,
+    summary="Update tool detail render config",
+    description="Update whether tool execution details are shown in channels",
+)
+async def put_show_tool_details(
+    payload: ShowToolDetailsConfig = Body(
+        ...,
+        description="Tool details render configuration",
+    ),
+) -> ShowToolDetailsConfig:
+    """Update global show_tool_details flag."""
+    config = load_config()
+    config.show_tool_details = payload.show_tool_details
+    save_config(config)
+    return ShowToolDetailsConfig(show_tool_details=config.show_tool_details)

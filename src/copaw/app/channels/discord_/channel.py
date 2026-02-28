@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 import logging
 import asyncio
-from typing import Any, Optional
+import warnings
+from typing import Any, Optional, Awaitable, Callable
 
 import aiohttp
 from agentscope_runtime.engine.schemas.agent_schemas import (
@@ -27,6 +28,8 @@ logger = logging.getLogger(__name__)
 class DiscordChannel(BaseChannel):
     channel = "discord"
     uses_manager_queue = True
+    _send_retry_attempts = 3
+    _send_retry_base_delay_sec = 0.5
 
     def __init__(
         self,
@@ -53,6 +56,17 @@ class DiscordChannel(BaseChannel):
         self._client = None
 
         if self.enabled:
+            # aiohttp>=3.13 emits this deprecation warning from discord.py
+            # internals. Keep logs clean until upstream fully migrates.
+            warnings.filterwarnings(
+                "ignore",
+                category=DeprecationWarning,
+                message=(
+                    "parameter 'timeout' of type 'float' is deprecated, "
+                    "please use 'timeout=ClientWSTimeout\\(ws_close=...\\)'"
+                ),
+                module=r"discord\.http",
+            )
             import discord  # type: ignore
 
             intents = discord.Intents.default()
@@ -204,6 +218,41 @@ class DiscordChannel(BaseChannel):
             show_tool_details=show_tool_details,
         )
 
+    async def _send_with_retry(
+        self,
+        send_op: Callable[[], Awaitable[None]],
+        target: str,
+    ) -> None:
+        for attempt in range(1, self._send_retry_attempts + 1):
+            try:
+                await send_op()
+                return
+            except (
+                aiohttp.ClientConnectionError,
+                asyncio.TimeoutError,
+                ConnectionResetError,
+            ) as exc:
+                if attempt >= self._send_retry_attempts:
+                    logger.warning(
+                        "discord send failed after retries "
+                        "target=%s attempts=%s err=%s",
+                        target,
+                        attempt,
+                        repr(exc),
+                    )
+                    raise
+                delay = self._send_retry_base_delay_sec * (2 ** (attempt - 1))
+                logger.warning(
+                    "discord send transient error target=%s "
+                    "attempt=%s/%s err=%s retry_in=%.2fs",
+                    target,
+                    attempt,
+                    self._send_retry_attempts,
+                    type(exc).__name__,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+
     async def send(
         self,
         to_handle: str,
@@ -242,7 +291,10 @@ class DiscordChannel(BaseChannel):
                 ch = await self._client.fetch_channel(
                     int(channel_id),
                 )
-            await ch.send(text)
+            await self._send_with_retry(
+                lambda: ch.send(text),
+                target=f"channel:{channel_id}",
+            )
             return
 
         if user_id:
@@ -252,7 +304,10 @@ class DiscordChannel(BaseChannel):
                     int(user_id),
                 )
             dm = user.dm_channel or await user.create_dm()
-            await dm.send(text)
+            await self._send_with_retry(
+                lambda: dm.send(text),
+                target=f"dm:{user_id}",
+            )
             return
 
         raise ValueError(

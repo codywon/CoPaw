@@ -102,6 +102,11 @@ class AgentRunner(Runner):
                 memory_manager=self.memory_manager,
                 max_iters=max_iters,
                 max_input_length=max_input_length,
+                agent_role="main",
+                session_id=session_id,
+                user_id=user_id,
+                channel=channel,
+                subagents_config=config.agents.subagents,
             )
             await agent.register_mcp_clients()
             agent.set_console_output_enabled(enabled=False)
