@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default max length for tool result text truncation during compaction
-_DEFAULT_COMPACT_TOOL_RESULT_MAX_LENGTH = 5000
+_DEFAULT_COMPACT_TOOL_RESULT_MAX_LENGTH = 10000
 
 
 def _truncate_tool_result_texts(
@@ -92,10 +92,12 @@ class MemoryCompactionHook:
         """Whether to truncate tool result texts.
 
         Controlled by environment variable ENABLE_TRUNCATE_TOOL_RESULT_TEXTS.
-        Default is True (enabled) to prevent memory bloat from large outputs.
+        Default is False (disabled).
         """
-        env_value = os.environ.get("ENABLE_TRUNCATE_TOOL_RESULT_TEXTS", "true")
-        return env_value.lower() in ("true", "1", "yes")
+        return os.environ.get(
+            "ENABLE_TRUNCATE_TOOL_RESULT_TEXTS",
+            "false",
+        ).lower() in ("true", "1", "yes")
 
     async def __call__(
         self,
