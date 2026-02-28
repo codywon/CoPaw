@@ -57,7 +57,7 @@
 >
 > - **我想三条命令跑起来**： [快速开始](#快速开始) → 浏览器打开控制台。
 > - **我想在钉钉 / 飞书 / QQ 里聊**： [快速开始](#快速开始) → [频道配置](https://copaw.agentscope.io/docs/channels)。
-> - **我不想装 Python**：[一键安装](#一键安装推荐) 自动管理 Python，或使用 [魔搭一键配置](https://modelscope.cn/studios/fork?target=AgentScope/CoPaw) 云端部署。
+> - **我不想装 Python**：[一键安装](#一键安装beta持续完善中) 自动管理 Python，或使用 [魔搭一键配置](https://modelscope.cn/studios/fork?target=AgentScope/CoPaw) 云端部署。
 
 - [快速开始](#快速开始)
 - [API Key](#api-key)
@@ -173,6 +173,10 @@ docker run -p 8088:8088 -v copaw-data:/app/working agentscope/copaw:latest
 
 **不想本地安装？** 使用 [魔搭创空间](https://modelscope.cn/studios/fork?target=AgentScope/CoPaw) 一键云端配置。请将创空间设为 **非公开**，否则他人可能操纵你的 CoPaw。
 
+### 部署到阿里云 ECS
+
+若希望将 CoPaw 部署在阿里云上，可使用阿里云 ECS 一键部署：打开 [CoPaw 阿里云 ECS 部署链接](https://computenest.console.aliyun.com/service/instance/create/cn-hangzhou?type=user&ServiceId=service-1ed84201799f40879884) 按页面提示操作即可。详细步骤见 [阿里云开发者社区：CoPaw 3 分钟部署你的 AI 助理](https://developer.aliyun.com/article/1713682)。
+
 ---
 
 ## API Key
@@ -254,6 +258,14 @@ CoPaw 既是「你的搭档小爪子」（co-paw），也寓意 **Co Personal Ag
 ## 由谁构建
 
 [AgentScope 团队](https://github.com/agentscope-ai) · [AgentScope](https://github.com/agentscope-ai/agentscope) · [AgentScope Runtime](https://github.com/agentscope-ai/agentscope-runtime) · [ReMe](https://github.com/agentscope-ai/ReMe)
+
+---
+
+## 联系我们
+
+| [Discord](https://discord.gg/eYMpfnkG8h)                     | [钉钉](https://qr.dingtalk.com/action/joingroup?code=v1,k1,OmDlBXpjW+I2vWjKDsjvI9dhcXjGZi3bQiojOq3dlDw=&_dt_no_comment=1&origin=11) |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| [<img src="https://gw.alicdn.com/imgextra/i1/O1CN01hhD1mu1Dd3BWVUvxN_!!6000000000238-2-tps-400-400.png" width="80" height="80" alt="Discord">](https://discord.gg/eYMpfnkG8h) | [<img src="https://img.alicdn.com/imgextra/i4/O1CN014mhqFq1ZlgNuYjxrz_!!6000000003235-2-tps-400-400.png" width="80" height="80" alt="钉钉">](https://qr.dingtalk.com/action/joingroup?code=v1,k1,OmDlBXpjW+I2vWjKDsjvI9dhcXjGZi3bQiojOq3dlDw=&_dt_no_comment=1&origin=11) |
 
 ---
 

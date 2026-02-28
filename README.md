@@ -57,7 +57,7 @@ Your Personal AI Assistant; easy to install, deploy on your own machine or on th
 >
 > - **I want to run CoPaw in 3 commands**: [Quick Start](#quick-start) → open Console in browser.
 > - **I want to chat in DingTalk / Feishu / QQ**: [Quick Start](#quick-start) → [Channels](https://copaw.agentscope.io/docs/channels).
-> - **I don’t want to install Python**: [One-line install](#one-line-install-recommended) handles Python automatically, or use [ModelScope one-click](https://modelscope.cn/studios/fork?target=AgentScope/CoPaw) for cloud.
+> - **I don’t want to install Python**: [One-line install](#one-line-install-beta-continuously-improving) handles Python automatically, or use [ModelScope one-click](https://modelscope.cn/studios/fork?target=AgentScope/CoPaw) for cloud.
 
 - [Quick Start](#quick-start)
 - [API Key](#api-key)
@@ -173,6 +173,10 @@ The image is built from scratch. To build the image yourself, please refer to th
 
 **No local install?** [ModelScope Studio](https://modelscope.cn/studios/fork?target=AgentScope/CoPaw) one-click cloud setup. Set your Studio to **non-public** so others cannot control your CoPaw.
 
+### Deploy on Alibaba Cloud ECS
+
+To run CoPaw on Alibaba Cloud (ECS), use the one-click deployment: open the [CoPaw on Alibaba Cloud (ECS) deployment link](https://computenest.console.aliyun.com/service/instance/create/cn-hangzhou?type=user&ServiceId=service-1ed84201799f40879884) and follow the prompts. For step-by-step instructions, see [Alibaba Cloud Developer: Deploy your AI assistant in 3 minutes](https://developer.aliyun.com/article/1713682).
+
 ---
 
 ## API Key
@@ -252,6 +256,14 @@ CoPaw represents both a **Co Personal Agent Workstation** and a "co-paw"—a par
 ## Built by
 
 [AgentScope team](https://github.com/agentscope-ai) · [AgentScope](https://github.com/agentscope-ai/agentscope) · [AgentScope Runtime](https://github.com/agentscope-ai/agentscope-runtime) · [ReMe](https://github.com/agentscope-ai/ReMe)
+
+---
+
+## Contact us
+
+| [Discord](https://discord.gg/eYMpfnkG8h)                     | [DingTalk](https://qr.dingtalk.com/action/joingroup?code=v1,k1,OmDlBXpjW+I2vWjKDsjvI9dhcXjGZi3bQiojOq3dlDw=&_dt_no_comment=1&origin=11) |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| [<img src="https://gw.alicdn.com/imgextra/i1/O1CN01hhD1mu1Dd3BWVUvxN_!!6000000000238-2-tps-400-400.png" width="80" height="80" alt="Discord">](https://discord.gg/eYMpfnkG8h) | [<img src="https://img.alicdn.com/imgextra/i4/O1CN014mhqFq1ZlgNuYjxrz_!!6000000003235-2-tps-400-400.png" width="80" height="80" alt="DingTalk">](https://qr.dingtalk.com/action/joingroup?code=v1,k1,OmDlBXpjW+I2vWjKDsjvI9dhcXjGZi3bQiojOq3dlDw=&_dt_no_comment=1&origin=11) |
 
 ---
 
