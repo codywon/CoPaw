@@ -169,6 +169,7 @@ export function ProviderConfigModal({
                     required: true,
                     message: t("models.pleaseEnterBaseURL"),
                   },
+                  { type: "url", message: t("models.pleaseEnterValidURL") },
                 ]
               : []
           }
