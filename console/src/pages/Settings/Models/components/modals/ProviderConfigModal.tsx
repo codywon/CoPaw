@@ -13,6 +13,7 @@ interface ProviderConfigModalProps {
     api_key_prefix?: string;
     current_base_url?: string;
     is_custom: boolean;
+    needs_base_url: boolean;
     has_api_key: boolean;
   };
   activeModels: any;
@@ -162,21 +163,32 @@ export function ProviderConfigModal({
           name="base_url"
           label="Base URL"
           rules={
-            provider.is_custom
+            provider.needs_base_url
               ? [
                   {
                     required: true,
                     message: t("models.pleaseEnterBaseURL"),
                   },
-                  { type: "url", message: t("models.pleaseEnterValidURL") },
                 ]
               : []
           }
-          extra={provider.is_custom ? t("models.openAIEndpoint") : undefined}
+          extra={
+            provider.needs_base_url
+              ? provider.id === "azure-openai"
+                ? t("models.azureEndpointHint")
+                : t("models.openAIEndpoint")
+              : undefined
+          }
         >
           <Input
-            placeholder={provider.is_custom ? "http://localhost:11434/v1" : ""}
-            disabled={!provider.is_custom}
+            placeholder={
+              provider.needs_base_url
+                ? provider.id === "azure-openai"
+                  ? "https://<resource>.openai.azure.com/openai/v1"
+                  : "http://localhost:11434/v1"
+                : ""
+            }
+            disabled={!provider.needs_base_url}
           />
         </Form.Item>
 
