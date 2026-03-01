@@ -4,7 +4,10 @@ import time
 import pytest
 
 from copaw.agents.subagents import get_subagent_task_store
-from copaw.agents.subagents.manager import SubagentManager
+from copaw.agents.subagents.manager import (
+    SubagentManager,
+    create_subagent_manager,
+)
 
 
 @pytest.mark.asyncio
@@ -186,7 +189,21 @@ async def test_manager_records_status_change_events():
     )
 
     events = store.list_task_events(task.task_id)
-    statuses = [event.status for event in events if event.type == "status_change"]
+    statuses = [
+        event.status
+        for event in events
+        if event.type == "status_change"
+    ]
     assert "queued" in statuses
     assert "running" in statuses
     assert "success" in statuses
+
+
+def test_create_subagent_manager_uses_injected_interfaces():
+    class _Cfg:
+        max_concurrency = 2
+        default_timeout_seconds = 30
+        hard_timeout_seconds = 60
+
+    manager = create_subagent_manager(_Cfg())
+    assert isinstance(manager, SubagentManager)

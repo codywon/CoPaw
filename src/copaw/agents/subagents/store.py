@@ -1,17 +1,23 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import json
+import os
 import threading
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Dict, List, Optional
 
+from ...constant import WORKING_DIR
 from .models import (
     SubagentTask,
     SubagentTaskEvent,
     SubagentTaskEventType,
     SubagentTaskStatus,
 )
+from .protocols import TaskStore
 
 _TERMINAL_STATUSES: set[SubagentTaskStatus] = {
     "success",
@@ -25,7 +31,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class InMemorySubagentTaskStore:
+class InMemoryTaskStore:
     """Thread-safe in-memory subagent task store."""
 
     def __init__(self) -> None:
@@ -90,11 +96,15 @@ class InMemorySubagentTaskStore:
                 status="queued",
                 summary="Task queued",
             )
+            self._after_task_mutation_locked(task_id)
         return task_id
 
     def list_tasks(self) -> List[SubagentTask]:
         with self._lock:
-            return [task.model_copy(deep=True) for task in self._tasks.values()]
+            return [
+                task.model_copy(deep=True)
+                for task in self._tasks.values()
+            ]
 
     def get_task(self, task_id: str) -> Optional[SubagentTask]:
         with self._lock:
@@ -144,14 +154,20 @@ class InMemorySubagentTaskStore:
                     "max_attempts": task.max_attempts,
                 },
             )
+            self._after_task_mutation_locked(task_id)
             return task.model_copy(deep=True)
 
-    def set_attempt(self, task_id: str, attempt: int) -> Optional[SubagentTask]:
+    def set_attempt(
+        self,
+        task_id: str,
+        attempt: int,
+    ) -> Optional[SubagentTask]:
         with self._lock:
             task = self._tasks.get(task_id)
             if task is None:
                 return None
             task.attempts = max(0, int(attempt))
+            self._after_task_mutation_locked(task_id)
             return task.model_copy(deep=True)
 
     def append_event(
@@ -166,13 +182,15 @@ class InMemorySubagentTaskStore:
         with self._lock:
             if task_id not in self._tasks:
                 return None
-            return self._append_event_locked(
+            event = self._append_event_locked(
                 task_id=task_id,
                 event_type=event_type,
                 summary=summary,
                 status=status,
                 payload=payload,
             )
+            self._after_task_mutation_locked(task_id)
+            return event
 
     def list_task_events(self, task_id: str) -> List[SubagentTaskEvent]:
         with self._lock:
@@ -214,6 +232,7 @@ class InMemorySubagentTaskStore:
                 status="cancelled",
                 summary="Task cancelled",
             )
+            self._after_task_mutation_locked(task_id)
             return task.model_copy(deep=True)
 
     def _append_event_locked(
@@ -241,9 +260,101 @@ class InMemorySubagentTaskStore:
         bucket.append(event)
         return event.model_copy(deep=True)
 
+    def _after_task_mutation_locked(self, task_id: str) -> None:
+        return
 
-_GLOBAL_SUBAGENT_TASK_STORE = InMemorySubagentTaskStore()
+
+class FileTaskStore(InMemoryTaskStore):
+    """Task store backed by per-task JSON files."""
+
+    def __init__(self, store_dir: Path | str) -> None:
+        self._store_dir = Path(store_dir).expanduser().resolve()
+        self._store_dir.mkdir(parents=True, exist_ok=True)
+        super().__init__()
+        self._load_from_disk()
+
+    def _task_file(self, task_id: str) -> Path:
+        return self._store_dir / f"{task_id}.json"
+
+    def _load_from_disk(self) -> None:
+        with self._lock:
+            for path in sorted(self._store_dir.glob("*.json")):
+                try:
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                    task = SubagentTask.model_validate(payload.get("task", {}))
+                    events_raw = payload.get("events", [])
+                    events = [
+                        SubagentTaskEvent.model_validate(item)
+                        for item in events_raw
+                        if isinstance(item, dict)
+                    ]
+                except Exception:
+                    continue
+                self._tasks[task.task_id] = task
+                self._events[task.task_id] = events
+                if task.parent_task_id:
+                    bucket = self._children.get(task.parent_task_id)
+                    if bucket is None:
+                        bucket = set()
+                        self._children[task.parent_task_id] = bucket
+                    bucket.add(task.task_id)
+
+    def _after_task_mutation_locked(self, task_id: str) -> None:
+        task = self._tasks.get(task_id)
+        if task is None:
+            return
+        events = self._events.get(task_id, [])
+        payload = {
+            "task": task.model_dump(mode="json"),
+            "events": [event.model_dump(mode="json") for event in events],
+        }
+        target_path = self._task_file(task_id)
+        with NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(self._store_dir),
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            json.dump(payload, tmp, ensure_ascii=False, indent=2)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            temp_path = Path(tmp.name)
+        os.replace(temp_path, target_path)
 
 
-def get_subagent_task_store() -> InMemorySubagentTaskStore:
-    return _GLOBAL_SUBAGENT_TASK_STORE
+InMemorySubagentTaskStore = InMemoryTaskStore
+
+
+_GLOBAL_SUBAGENT_TASK_STORE: Optional[TaskStore] = None
+_GLOBAL_SUBAGENT_TASK_STORE_LOCK = threading.Lock()
+
+
+def _build_task_store_from_config() -> TaskStore:
+    try:
+        from ...config import load_config
+
+        cfg = load_config().agents.subagents
+        if cfg.task_store_backend == "memory":
+            return InMemoryTaskStore()
+        task_store_dir = cfg.task_store_dir.strip() or "data/subagent_tasks"
+        root = Path(task_store_dir)
+        if not root.is_absolute():
+            root = WORKING_DIR / root
+        return FileTaskStore(root)
+    except Exception:
+        return InMemoryTaskStore()
+
+
+def get_subagent_task_store() -> TaskStore:
+    global _GLOBAL_SUBAGENT_TASK_STORE
+    with _GLOBAL_SUBAGENT_TASK_STORE_LOCK:
+        if _GLOBAL_SUBAGENT_TASK_STORE is None:
+            _GLOBAL_SUBAGENT_TASK_STORE = _build_task_store_from_config()
+        return _GLOBAL_SUBAGENT_TASK_STORE
+
+
+def set_subagent_task_store_for_testing(store: TaskStore) -> None:
+    global _GLOBAL_SUBAGENT_TASK_STORE
+    with _GLOBAL_SUBAGENT_TASK_STORE_LOCK:
+        _GLOBAL_SUBAGENT_TASK_STORE = store

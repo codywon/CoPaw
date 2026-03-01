@@ -9,9 +9,27 @@ from .models import (
     SubagentTaskListResponse,
     SubagentTaskStatus,
 )
-from .manager import SubagentManager
-from .policy import DispatchDecision, select_role_for_task, should_force_dispatch
-from .store import InMemorySubagentTaskStore, get_subagent_task_store
+from .manager import SubagentManager, create_subagent_manager
+from .policy import (
+    DispatchDecision,
+    select_role_for_task,
+    should_force_dispatch,
+)
+from .protocols import (
+    ModelPlan,
+    ModelRouter,
+    ModelTarget,
+    QueueBackend,
+    TaskStore,
+)
+from .queue import InProcQueue
+from .router import LocalModelRouter
+from .store import (
+    FileTaskStore,
+    InMemorySubagentTaskStore,
+    InMemoryTaskStore,
+    get_subagent_task_store,
+)
 
 __all__ = [
     "SubagentTask",
@@ -23,9 +41,19 @@ __all__ = [
     "SubagentModelProviderOption",
     "SubagentRoleModelOptionsResponse",
     "SubagentManager",
+    "create_subagent_manager",
     "DispatchDecision",
     "select_role_for_task",
     "should_force_dispatch",
+    "TaskStore",
+    "QueueBackend",
+    "ModelRouter",
+    "ModelTarget",
+    "ModelPlan",
+    "InProcQueue",
+    "LocalModelRouter",
+    "InMemoryTaskStore",
     "InMemorySubagentTaskStore",
+    "FileTaskStore",
     "get_subagent_task_store",
 ]

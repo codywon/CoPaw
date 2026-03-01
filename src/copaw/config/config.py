@@ -223,6 +223,8 @@ class SubagentsConfig(BaseModel):
     retry_max_attempts: int = Field(default=1, ge=1)
     retry_backoff_seconds: int = Field(default=0, ge=0)
     write_mode: Literal["worktree", "direct"] = "worktree"
+    task_store_backend: Literal["file", "memory"] = "file"
+    task_store_dir: str = "data/subagent_tasks"
     allow_nested_spawn: bool = False
     dispatch_mode: SubagentDispatchMode = "advisory"
     auto_dispatch_keywords: List[str] = Field(

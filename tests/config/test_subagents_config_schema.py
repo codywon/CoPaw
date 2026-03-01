@@ -1,10 +1,16 @@
-from copaw.config.config import AgentsConfig, SubagentRoleConfig, SubagentsConfig
+from copaw.config.config import (
+    AgentsConfig,
+    SubagentRoleConfig,
+    SubagentsConfig,
+)
 
 
 def test_subagents_defaults_loaded():
     cfg = AgentsConfig()
     assert cfg.subagents.max_concurrency == 5
     assert cfg.subagents.write_mode == "worktree"
+    assert cfg.subagents.task_store_backend == "file"
+    assert cfg.subagents.task_store_dir == "data/subagent_tasks"
     assert cfg.subagents.dispatch_mode == "advisory"
     assert cfg.subagents.role_selection_mode == "auto"
     assert cfg.subagents.execution_mode == "sync"

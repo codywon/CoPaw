@@ -50,6 +50,7 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pre-commit>=4.2.0",
     "pytest-cov>=6.2.1",
+    "flake8>=7.0.0,<8",
 ]
 local = [
     "huggingface_hub>=0.20.0",

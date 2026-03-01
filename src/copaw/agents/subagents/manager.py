@@ -3,12 +3,25 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
+from ...config import SubagentsConfig
 from .models import SubagentTask
-from .store import InMemorySubagentTaskStore, get_subagent_task_store
+from .protocols import ModelRouter, QueueBackend, TaskStore
+from .queue import InProcQueue
+from .router import LocalModelRouter
+from .store import get_subagent_task_store
 
 SubagentRunner = Callable[[], Awaitable[str]]
+
+
+@dataclass
+class _QueuedExecution:
+    runner: SubagentRunner
+    timeout_seconds: Optional[int]
+    retry_max_attempts: int
+    retry_backoff_seconds: int
 
 
 class SubagentManager:
@@ -26,7 +39,9 @@ class SubagentManager:
         max_concurrency: int,
         default_timeout_seconds: int,
         hard_timeout_seconds: int,
-        store: Optional[InMemorySubagentTaskStore] = None,
+        store: Optional[TaskStore] = None,
+        queue_backend: Optional[QueueBackend] = None,
+        model_router: Optional[ModelRouter] = None,
     ) -> None:
         self._max_concurrency = max(1, max_concurrency)
         self._semaphore = self._get_global_semaphore(self._max_concurrency)
@@ -36,6 +51,16 @@ class SubagentManager:
             hard_timeout_seconds,
         )
         self._store = store or get_subagent_task_store()
+        self._queue_backend = queue_backend or InProcQueue()
+        self._model_router = model_router or LocalModelRouter()
+        self._queued_executions: dict[str, _QueuedExecution] = {}
+        self._queued_executions_lock = threading.Lock()
+        self._dispatch_loop_task: Optional[asyncio.Task] = None
+        self._dispatch_loop_lock = threading.Lock()
+
+    @property
+    def model_router(self) -> ModelRouter:
+        return self._model_router
 
     @classmethod
     def _get_global_semaphore(cls, max_concurrency: int) -> asyncio.Semaphore:
@@ -210,18 +235,18 @@ class SubagentManager:
             model_fallback_used=model_fallback_used,
             cost_estimate_usd=cost_estimate_usd,
         )
-        bg_task = asyncio.create_task(
-            self._execute_task(
-                task_id=task_id,
+        with self._queued_executions_lock:
+            self._queued_executions[task_id] = _QueuedExecution(
                 runner=runner,
                 timeout_seconds=timeout_seconds,
                 retry_max_attempts=retry_max_attempts,
                 retry_backoff_seconds=retry_backoff_seconds,
-            ),
-            name=f"subagent-task-{task_id}",
+            )
+        asyncio.create_task(
+            self._queue_backend.enqueue(task_id),
+            name=f"subagent-enqueue-{task_id}",
         )
-        self._set_running_task(task_id, bg_task)
-        bg_task.add_done_callback(lambda _: self._clear_running_task(task_id))
+        self._ensure_dispatch_loop_started()
         snapshot = self._store.get_task(task_id)
         if snapshot is None:
             raise RuntimeError("Task missing after queueing")
@@ -234,7 +259,7 @@ class SubagentManager:
     def cancel_task_tree_for_store(
         cls,
         task_id: str,
-        store: InMemorySubagentTaskStore,
+        store: TaskStore,
     ) -> list[str]:
         all_ids = [task_id] + store.get_descendant_task_ids(task_id)
         cancelled: list[str] = []
@@ -249,6 +274,41 @@ class SubagentManager:
 
     def cancel_task_tree(self, task_id: str) -> list[str]:
         return self.cancel_task_tree_for_store(task_id, self._store)
+
+    async def _dispatch_loop(self) -> None:
+        while True:
+            task_id = await self._queue_backend.dequeue()
+            if task_id is None:
+                return
+            with self._queued_executions_lock:
+                queued = self._queued_executions.pop(task_id, None)
+            if queued is None:
+                continue
+            execution = asyncio.create_task(
+                self._execute_task(
+                    task_id=task_id,
+                    runner=queued.runner,
+                    timeout_seconds=queued.timeout_seconds,
+                    retry_max_attempts=queued.retry_max_attempts,
+                    retry_backoff_seconds=queued.retry_backoff_seconds,
+                ),
+                name=f"subagent-task-{task_id}",
+            )
+            self._set_running_task(task_id, execution)
+            execution.add_done_callback(
+                lambda _done, tid=task_id: self._clear_running_task(tid),
+            )
+
+    def _ensure_dispatch_loop_started(self) -> None:
+        with self._dispatch_loop_lock:
+            if (
+                self._dispatch_loop_task is None
+                or self._dispatch_loop_task.done()
+            ):
+                self._dispatch_loop_task = asyncio.create_task(
+                    self._dispatch_loop(),
+                    name="subagent-dispatch-loop",
+                )
 
     async def _execute_task(
         self,
@@ -290,12 +350,16 @@ class SubagentManager:
                             result_summary=result_text.strip(),
                         )
                         if snapshot is None:
-                            raise RuntimeError("Task missing after success update")
+                            raise RuntimeError(
+                                "Task missing after success update",
+                            )
                         return snapshot
                     except asyncio.CancelledError:
                         snapshot = self._store.cancel_task(task_id)
                         if snapshot is None:
-                            raise RuntimeError("Task missing after cancellation")
+                            raise RuntimeError(
+                                "Task missing after cancellation",
+                            )
                         return snapshot
                     except asyncio.TimeoutError:
                         if attempt < max_attempts:
@@ -320,7 +384,9 @@ class SubagentManager:
                             ),
                         )
                         if snapshot is None:
-                            raise RuntimeError("Task missing after timeout update")
+                            raise RuntimeError(
+                                "Task missing after timeout update",
+                            )
                         return snapshot
                     except Exception as exc:  # pylint: disable=broad-except
                         if attempt < max_attempts:
@@ -339,13 +405,17 @@ class SubagentManager:
                             error_message=str(exc),
                         )
                         if snapshot is None:
-                            raise RuntimeError("Task missing after error update")
+                            raise RuntimeError(
+                                "Task missing after error update",
+                            )
                         return snapshot
 
                 snapshot = self._store.set_status(
                     task_id,
                     "error",
-                    error_message="Subagent task failed without terminal result",
+                    error_message=(
+                        "Subagent task failed without terminal result"
+                    ),
                 )
                 if snapshot is None:
                     raise RuntimeError("Task missing after terminal failure")
@@ -364,3 +434,20 @@ class SubagentManager:
         if resolved > self._hard_timeout_seconds:
             return self._hard_timeout_seconds
         return resolved
+
+
+def create_subagent_manager(
+    config: SubagentsConfig,
+    *,
+    task_store: Optional[TaskStore] = None,
+    queue_backend: Optional[QueueBackend] = None,
+    model_router: Optional[ModelRouter] = None,
+) -> SubagentManager:
+    return SubagentManager(
+        max_concurrency=config.max_concurrency,
+        default_timeout_seconds=config.default_timeout_seconds,
+        hard_timeout_seconds=config.hard_timeout_seconds,
+        store=task_store or get_subagent_task_store(),
+        queue_backend=queue_backend or InProcQueue(),
+        model_router=model_router or LocalModelRouter(),
+    )

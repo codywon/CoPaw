@@ -20,6 +20,7 @@ from .model_factory import create_model_and_formatter
 from .prompt import build_system_prompt_from_working_dir
 from .subagents import (
     SubagentManager,
+    create_subagent_manager,
     select_role_for_task,
     should_force_dispatch,
 )
@@ -248,8 +249,9 @@ class CoPawAgent(ReActAgent):
                 "calling the `spawn_worker` tool.\n"
                 "- Use it when decomposition, isolation, or long-running task "
                 "execution is beneficial.\n"
-                "- Keep responsibility split clear: delegate execution details "
-                "to subagents, then synthesize final answer yourself.\n"
+                "- Keep responsibility split clear: "
+                "delegate execution details to subagents, "
+                "then synthesize final answer yourself.\n"
                 f"- Current dispatch_mode: "
                 f"`{self._subagents_config.dispatch_mode}`.\n"
             )
@@ -339,11 +341,7 @@ class CoPawAgent(ReActAgent):
     def _get_or_create_subagent_manager(self) -> SubagentManager:
         if self._subagent_manager is None:
             cfg = self._subagents_config
-            self._subagent_manager = SubagentManager(
-                max_concurrency=cfg.max_concurrency,
-                default_timeout_seconds=cfg.default_timeout_seconds,
-                hard_timeout_seconds=cfg.hard_timeout_seconds,
-            )
+            self._subagent_manager = create_subagent_manager(cfg)
         return self._subagent_manager
 
     def _select_subagent_mcp_clients(
@@ -351,7 +349,11 @@ class CoPawAgent(ReActAgent):
         role_config: Optional[SubagentRoleConfig] = None,
     ) -> list[Any]:
         cfg = self._subagents_config
-        role_policy = role_config.mcp_policy if role_config is not None else "inherit"
+        role_policy = (
+            role_config.mcp_policy
+            if role_config is not None
+            else "inherit"
+        )
         if role_policy == "inherit":
             policy = cfg.mcp_policy
             selected = set(cfg.mcp_selected)
@@ -464,67 +466,42 @@ class CoPawAgent(ReActAgent):
     ) -> dict[str, Any]:
         """Resolve model selection for a subagent from role policy first."""
         providers_data = load_providers_json()
-        active_provider = providers_data.active_llm.provider_id
-        active_model = providers_data.active_llm.model
+        manager = self._get_or_create_subagent_manager()
+        model_plan = manager.model_router.select(
+            role_config,
+            task_ctx={
+                "active_provider": providers_data.active_llm.provider_id,
+                "active_model": providers_data.active_llm.model,
+            },
+        )
 
-        selected_provider = active_provider
-        selected_model = active_model
+        selected_provider = model_plan.primary.provider
+        selected_model = model_plan.primary.model
         fallback_used = False
         llm_cfg = None
 
-        if role_config is not None:
-            role_provider = role_config.model_provider.strip()
-            role_model = role_config.model_name.strip()
-            if role_provider and role_model:
-                seen: set[str] = set()
-                candidates: list[str] = []
-                for item in [role_model, *role_config.fallback_models]:
-                    model_name = item.strip()
-                    if not model_name:
-                        continue
-                    key = model_name.lower()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    candidates.append(model_name)
-
-                for idx, model_name in enumerate(candidates):
-                    resolved = resolve_llm_config(
-                        role_provider,
-                        model_name,
-                        providers_data,
-                    )
-                    if resolved is None:
-                        continue
-                    selected_provider = role_provider
-                    selected_model = model_name
-                    fallback_used = idx > 0
-                    llm_cfg = resolved
-                    break
-                if llm_cfg is None:
-                    logger.warning(
-                        "Role model policy unresolved for role=%s provider=%s model=%s; falling back to active model",
-                        role_config.key,
-                        role_provider,
-                        role_model,
-                    )
-
-        if llm_cfg is None and selected_provider and selected_model:
-            llm_cfg = resolve_llm_config(
-                selected_provider,
-                selected_model,
+        candidates = [model_plan.primary, *model_plan.fallbacks]
+        for idx, target in enumerate(candidates):
+            if not target.provider or not target.model:
+                continue
+            resolved = resolve_llm_config(
+                target.provider,
+                target.model,
                 providers_data,
             )
+            if resolved is None:
+                continue
+            selected_provider = target.provider
+            selected_model = target.model
+            fallback_used = idx > 0
+            llm_cfg = resolved
+            break
 
         return {
             "provider": selected_provider,
             "model": selected_model,
             "fallback_used": fallback_used,
-            "reasoning_effort": (
-                role_config.reasoning_effort.strip()
-                if role_config is not None
-                else ""
-            ),
+            "reasoning_effort": model_plan.reasoning_effort,
             "cost_estimate_usd": None,
             "llm_cfg": llm_cfg,
         }
