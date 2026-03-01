@@ -43,20 +43,8 @@ def _validate_subagents_config(config: SubagentsConfig) -> SubagentsConfig:
         seen.add(p)
     config.allowed_paths = normalized_paths
 
-    normalized_keywords: list[str] = []
-    seen_keywords: set[str] = set()
-    for keyword in config.auto_dispatch_keywords:
-        k = keyword.strip()
-        if not k:
-            continue
-        key = k.lower()
-        if key in seen_keywords:
-            continue
-        normalized_keywords.append(k)
-        seen_keywords.add(key)
-    config.auto_dispatch_keywords = normalized_keywords
-
     seen_role_keys: set[str] = set()
+    enabled_role_keys: set[str] = set()
     normalized_default_role = config.default_role.strip()
     normalized_roles = []
     for role in config.roles:
@@ -72,6 +60,8 @@ def _validate_subagents_config(config: SubagentsConfig) -> SubagentsConfig:
                 detail=f"duplicate subagent role key: {key}",
             )
         seen_role_keys.add(key)
+        if role.enabled:
+            enabled_role_keys.add(key)
         role.key = key
         role.name = role.name.strip() or key
         role.description = role.description.strip()
@@ -118,6 +108,23 @@ def _validate_subagents_config(config: SubagentsConfig) -> SubagentsConfig:
                 "when it is not empty"
             ),
         )
+    if config.role_selection_mode == "default":
+        if not normalized_default_role:
+            normalized_default_role = next(
+                (role.key for role in normalized_roles if role.enabled),
+                "",
+            )
+        if (
+            normalized_default_role
+            and normalized_default_role not in enabled_role_keys
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "default_role must reference an enabled role "
+                    "when role_selection_mode is default"
+                ),
+            )
     config.default_role = normalized_default_role
     config.roles = normalized_roles
     return config
@@ -144,7 +151,7 @@ async def put_subagents_config(
         description="Updated subagents configuration",
     ),
 ) -> SubagentsConfig:
-    validated = _validate_subagents_config(subagents_config)
+    validated = _validate_subagents_config(subagents_config.model_copy(deep=True))
     conf = load_config()
     conf.agents.subagents = validated
     save_config(conf)

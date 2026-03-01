@@ -914,28 +914,6 @@ class FeishuChannel(BaseChannel):
             },
         }
 
-    def _build_interactive_card_content(self, text: str) -> Dict[str, Any]:
-        """Build a minimal interactive card payload for text responses."""
-        normalized = normalize_feishu_md(text or "").strip() or "[empty]"
-        return {
-            "config": {
-                "wide_screen_mode": True,
-            },
-            "header": {
-                "template": "blue",
-                "title": {
-                    "tag": "plain_text",
-                    "content": self.bot_prefix.strip() or "CoPaw",
-                },
-            },
-            "elements": [
-                {
-                    "tag": "markdown",
-                    "content": normalized,
-                },
-            ],
-        }
-
     def _upload_image_sync(self, data: bytes, filename: str) -> Optional[str]:
         """Upload image via lark client; return image_key."""
         if not FEISHU_AVAILABLE or not self._client:
@@ -1110,24 +1088,8 @@ class FeishuChannel(BaseChannel):
         receive_id: str,
         body: str,
     ) -> bool:
-        """Send text as interactive card first, then fallback to post."""
+        """Send text as post (markdown), aligned with web plain output."""
         loop = asyncio.get_running_loop()
-        card = self._build_interactive_card_content(body)
-        card_content = json.dumps(card, ensure_ascii=False)
-        sent = await loop.run_in_executor(
-            None,
-            lambda: self._send_message_sync(
-                receive_id_type,
-                receive_id,
-                "interactive",
-                card_content,
-            ),
-        )
-        if sent:
-            logger.info("feishu _send_text: interactive card sent")
-            return True
-
-        logger.warning("feishu _send_text: interactive card failed; fallback to post")
         post = self._build_post_content(body, [])
         post_content = json.dumps(post, ensure_ascii=False)
         return await loop.run_in_executor(

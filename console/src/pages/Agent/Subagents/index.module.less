@@ -43,6 +43,113 @@
   margin-top: 8px;
 }
 
+.rolesLayout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.rolesSidebar {
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  background: #fafafa;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.rolesSidebarHeader {
+  padding: 10px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.rolesSidebarList {
+  padding: 8px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rolesSidebarEmpty {
+  color: #8c8c8c;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px;
+}
+
+.roleNavItem {
+  border: 1px solid #e6f4ff;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.roleNavItemActive {
+  border-color: #91caff;
+  box-shadow: 0 0 0 2px #e6f4ff;
+}
+
+.roleNavMain {
+  min-width: 0;
+}
+
+.roleNavName {
+  font-size: 13px;
+  font-weight: 600;
+  color: #262626;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.roleNavKey {
+  font-size: 12px;
+  color: #8c8c8c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.roleNavTail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.roleNavEnabled {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 12px;
+}
+
+.roleStatusDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.roleStatusDotEnabled {
+  background: #52c41a;
+  box-shadow: 0 0 0 2px #f6ffed;
+}
+
+.roleStatusDotDisabled {
+  background: #ff4d4f;
+  box-shadow: 0 0 0 2px #fff1f0;
+}
+
+.rolesDetail {
+  min-width: 0;
+}
+
 .tasksToolbar {
   display: flex;
   justify-content: space-between;
@@ -158,5 +265,13 @@
 
   .grid3 {
     grid-template-columns: 1fr;
+  }
+
+  .rolesLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .rolesSidebar {
+    max-height: none;
   }
 }

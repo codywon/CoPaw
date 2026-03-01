@@ -691,17 +691,22 @@ class BaseChannel(ABC):
                 parts.append(c.refusal)
         return "".join(parts)
 
-    def clone(self, config) -> "BaseChannel":
+    def clone(self, config, show_tool_details: bool | None = None) -> "BaseChannel":
         """Clone a new channel instance with updated config, cloning
         process and on_reply_sent from self.
 
         Subclasses must implement from_config(process, config, on_reply_sent).
         """
+        resolved_show_tool_details = (
+            self._show_tool_details
+            if show_tool_details is None
+            else show_tool_details
+        )
         return self.__class__.from_config(
             process=self._process,
             config=config,
             on_reply_sent=self._on_reply_sent,
-            show_tool_details=getattr(self, "_show_tool_details", True),
+            show_tool_details=resolved_show_tool_details,
         )
 
     async def start(self) -> None:

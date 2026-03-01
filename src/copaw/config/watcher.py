@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import Optional
@@ -36,6 +37,7 @@ class ConfigWatcher:
         # Snapshot of the last known channel config (for diffing)
         self._last_channels: Optional[ChannelConfig] = None
         self._last_channels_hash: Optional[int] = None
+        self._last_show_tool_details: Optional[bool] = None
         # mtime of config.json at last check
         self._last_mtime: float = 0.0
 
@@ -74,15 +76,17 @@ class ConfigWatcher:
             config = load_config(self._config_path)
             self._last_channels = config.channels.model_copy(deep=True)
             self._last_channels_hash = self._channels_hash(config.channels)
+            self._last_show_tool_details = config.show_tool_details
         except Exception:
             logger.exception("ConfigWatcher: failed to load initial config")
             self._last_channels = None
             self._last_channels_hash = None
+            self._last_show_tool_details = None
 
     @staticmethod
     def _channels_hash(channels: ChannelConfig) -> int:
         """Fast hash of channels section for quick change detection."""
-        return hash(str(channels.model_dump(mode="json")))
+        return hash(json.dumps(channels.model_dump(mode="json"), sort_keys=True))
 
     async def _poll_loop(self) -> None:
         while True:
@@ -110,24 +114,22 @@ class ConfigWatcher:
             return
 
         new_hash = self._channels_hash(config.channels)
-        if new_hash == self._last_channels_hash:
+        new_show_tool_details = config.show_tool_details
+        show_tool_details_changed = (
+            self._last_show_tool_details is None
+            or new_show_tool_details != self._last_show_tool_details
+        )
+        if new_hash == self._last_channels_hash and not show_tool_details_changed:
             return  # Only non-channel fields changed (e.g. last_dispatch)
 
         # 3) Diff per-channel and reload changed ones
         new_channels = config.channels
         old_channels = self._last_channels
 
-        extra_new = getattr(new_channels, "__pydantic_extra__", None) or {}
-        extra_old = (
-            getattr(old_channels, "__pydantic_extra__", None)
-            if old_channels
-            else {}
-        )
-
         for name in get_available_channels():
-            new_ch = getattr(new_channels, name, None) or extra_new.get(name)
+            new_ch = new_channels.get_channel_config(name)
             old_ch = (
-                getattr(old_channels, name, None) or extra_old.get(name)
+                old_channels.get_channel_config(name)
                 if old_channels
                 else None
             )
@@ -149,7 +151,11 @@ class ConfigWatcher:
                     if old_ch and hasattr(old_ch, "model_dump")
                     else None
                 )
-            if new_dump is not None and new_dump == old_dump:
+            if (
+                new_dump is not None
+                and new_dump == old_dump
+                and not show_tool_details_changed
+            ):
                 continue
 
             logger.info(
@@ -162,7 +168,10 @@ class ConfigWatcher:
                         f"ConfigWatcher: channel '{name}' not found, skip",
                     )
                     continue
-                new_channel = old_channel.clone(new_ch)
+                new_channel = old_channel.clone(
+                    new_ch,
+                    show_tool_details=new_show_tool_details,
+                )
                 await self._channel_manager.replace_channel(new_channel)
                 logger.info(f"ConfigWatcher: channel '{name}' reloaded")
             except Exception:
@@ -176,3 +185,4 @@ class ConfigWatcher:
         # 4) Update snapshot
         self._last_channels = new_channels.model_copy(deep=True)
         self._last_channels_hash = self._channels_hash(new_channels)
+        self._last_show_tool_details = new_show_tool_details

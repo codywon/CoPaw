@@ -96,19 +96,20 @@ class MessageRenderer:
         )
 
         def _parts_for_tool_call(content_list: list) -> List[_OutgoingPart]:
+            if not s.show_tool_details:
+                # Hide tool process messages entirely when detail display
+                # is disabled.
+                return []
             out: List[_OutgoingPart] = []
             for c in content_list:
                 if getattr(c, "type", None) != ContentType.DATA:
                     continue
                 data = getattr(c, "data", None) or {}
                 name = data.get("name") or "tool"
-                if s.show_tool_details:
-                    args = data.get("arguments") or "{}"
-                    args_preview = (
-                        args[:200] + "..." if len(args) > 200 else args
-                    )
-                else:
-                    args_preview = "..."
+                args = data.get("arguments") or "{}"
+                args_preview = (
+                    args[:200] + "..." if len(args) > 200 else args
+                )
                 text = _fmt_tool_call(name, args_preview, s)
                 out.append(TextContent(text=text))
             return out
@@ -192,20 +193,13 @@ class MessageRenderer:
                             if getattr(p, "type", None) in media_types
                         ]
                         out.extend(media_parts)
-                        if not media_parts:
-                            out.append(
-                                TextContent(
-                                    text=_fmt_tool_output_label(name, s)
-                                    + _fmt_code_block("...", s),
-                                ),
-                            )
                     continue
 
                 if isinstance(output, str):
+                    if not s.show_tool_details:
+                        continue
                     preview = (
                         (output[:500] + "..." if len(output) > 500 else output)
-                        if s.show_tool_details
-                        else "..."
                     )
                     out.append(
                         TextContent(
@@ -216,11 +210,11 @@ class MessageRenderer:
                     continue
 
                 if output is not None:
+                    if not s.show_tool_details:
+                        continue
                     raw = str(output)
                     preview = (
                         (raw[:500] + "..." if len(raw) > 500 else raw)
-                        if s.show_tool_details
-                        else "..."
                     )
                     out.append(
                         TextContent(
@@ -237,6 +231,8 @@ class MessageRenderer:
         ):
             parts = _parts_for_tool_call(content)
             if not parts:
+                if not s.show_tool_details:
+                    return []
                 parts = [TextContent(text=f"[{msg_type}]")]
             return parts
 
@@ -247,6 +243,8 @@ class MessageRenderer:
         ):
             parts = _parts_for_tool_output(content)
             if not parts:
+                if not s.show_tool_details:
+                    return []
                 parts = [TextContent(text=f"[{msg_type}]")]
             return parts
 
@@ -285,8 +283,8 @@ class MessageRenderer:
                         output is not None or args is not None
                     ):
                         if not s.show_tool_details:
-                            preview = "..."
-                        elif output is not None:
+                            continue
+                        if output is not None:
                             preview = str(output)[:500] + (
                                 "..." if len(str(output)) > 500 else ""
                             )

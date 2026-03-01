@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 from typing import Optional, Union, Dict, List, Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 from ..constant import (
     HEARTBEAT_DEFAULT_EVERY,
@@ -69,6 +69,14 @@ class ChannelConfig(BaseModel):
     feishu: FeishuConfig = FeishuConfig()
     qq: QQConfig = QQConfig()
     console: ConsoleConfig = ConsoleConfig()
+
+    def get_channel_config(self, name: str):
+        """Get channel config for *name* (declared field or extra key)."""
+        cfg = getattr(self, name, None)
+        if cfg is not None:
+            return cfg
+        extra = getattr(self, "__pydantic_extra__", None) or {}
+        return extra.get(name)
 
 
 class LastApiConfig(BaseModel):
@@ -144,6 +152,41 @@ SubagentRoleSelectionMode = Literal["auto", "default"]
 SubagentRolePolicy = Literal["inherit", "none", "selected", "all"]
 SubagentExecutionMode = Literal["sync", "async"]
 
+AUTO_DISPATCH_DEFAULT_KEYWORDS = [
+    "parallel",
+    "batch",
+    "crawl",
+    "research",
+    "collect",
+    "并行",
+    "批量",
+    "爬取",
+    "调研",
+    "采集",
+]
+
+# Backward-compat mapping for mojibake keywords that may exist in persisted
+# user config from earlier versions.
+AUTO_DISPATCH_MOJIBAKE_KEYWORDS = {
+    "骞惰": "并行",
+    "鎵归噺": "批量",
+    "鐖彇": "爬取",
+    "璋冪爺": "调研",
+    "閲囬泦": "采集",
+    "\u03b5\u0389\u0386\u03b8\u2018\u008c": "并行",
+    "\u03b6\u0089\u0389\u03b9\u0087\u008f": "批量",
+    "\u03b7\u0088\u00ac\u03b5\u008f\u0096": "爬取",
+    "\u03b8\u00b0\u0083\u03b7\u00a0\u0094": "调研",
+    "\u03b9\u0087\u0087\u03b9\u009b\u0086": "采集",
+}
+
+
+def _normalize_auto_dispatch_keyword(raw: str) -> str:
+    keyword = raw.strip()
+    if not keyword:
+        return ""
+    return AUTO_DISPATCH_MOJIBAKE_KEYWORDS.get(keyword, keyword)
+
 
 class SubagentRoleConfig(BaseModel):
     """Role profile for subagent specialization."""
@@ -183,18 +226,7 @@ class SubagentsConfig(BaseModel):
     allow_nested_spawn: bool = False
     dispatch_mode: SubagentDispatchMode = "advisory"
     auto_dispatch_keywords: List[str] = Field(
-        default_factory=lambda: [
-            "parallel",
-            "batch",
-            "crawl",
-            "research",
-            "collect",
-            "并行",
-            "批量",
-            "爬取",
-            "调研",
-            "采集",
-        ],
+        default_factory=lambda: list(AUTO_DISPATCH_DEFAULT_KEYWORDS),
     )
     auto_dispatch_min_prompt_chars: int = Field(default=120, ge=1)
     role_selection_mode: SubagentRoleSelectionMode = "auto"
@@ -206,6 +238,26 @@ class SubagentsConfig(BaseModel):
     mcp_selected: List[str] = Field(default_factory=list)
     skills_policy: SubagentPolicy = "selected"
     skills_selected: List[str] = Field(default_factory=list)
+
+    @field_validator("auto_dispatch_keywords", mode="before")
+    @classmethod
+    def normalize_auto_dispatch_keywords(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            keyword = _normalize_auto_dispatch_keyword(item)
+            if not keyword:
+                continue
+            key = keyword.lower()
+            if key in seen:
+                continue
+            normalized.append(keyword)
+            seen.add(key)
+        return normalized
 
 
 class AgentsConfig(BaseModel):

@@ -2,7 +2,9 @@
 
 from typing import List
 
-from fastapi import APIRouter, Body, HTTPException, Path
+import logging
+
+from fastapi import APIRouter, Body, HTTPException, Path, Request
 from pydantic import BaseModel
 from ...config import (
     load_config,
@@ -14,6 +16,7 @@ from ...config import (
 from ...constant import get_available_channels
 
 router = APIRouter(prefix="/config", tags=["config"])
+logger = logging.getLogger(__name__)
 
 
 class ShowToolDetailsConfig(BaseModel):
@@ -86,10 +89,7 @@ async def get_channel(
             detail=f"Channel '{channel_name}' not found",
         )
     config = load_config()
-    single_channel_config = getattr(config.channels, channel_name, None)
-    if single_channel_config is None:
-        extra = getattr(config.channels, "__pydantic_extra__", None) or {}
-        single_channel_config = extra.get(channel_name)
+    single_channel_config = config.channels.get_channel_config(channel_name)
     if single_channel_config is None:
         raise HTTPException(
             status_code=404,
@@ -140,7 +140,7 @@ async def get_show_tool_details() -> ShowToolDetailsConfig:
     """Get global show_tool_details flag."""
     config = load_config()
     return ShowToolDetailsConfig(
-        show_tool_details=getattr(config, "show_tool_details", True),
+        show_tool_details=config.show_tool_details,
     )
 
 
@@ -151,6 +151,7 @@ async def get_show_tool_details() -> ShowToolDetailsConfig:
     description="Update whether tool execution details are shown in channels",
 )
 async def put_show_tool_details(
+    request: Request,
     payload: ShowToolDetailsConfig = Body(
         ...,
         description="Tool details render configuration",
@@ -160,4 +161,15 @@ async def put_show_tool_details(
     config = load_config()
     config.show_tool_details = payload.show_tool_details
     save_config(config)
+
+    # Apply immediately to running channels (including Feishu) without
+    # waiting for config watcher polling.
+    channel_manager = getattr(getattr(request, "app", None), "state", None)
+    channel_manager = getattr(channel_manager, "channel_manager", None)
+    if channel_manager is not None:
+        await channel_manager.apply_show_tool_details(
+            config.channels,
+            config.show_tool_details,
+        )
+
     return ShowToolDetailsConfig(show_tool_details=config.show_tool_details)

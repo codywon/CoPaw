@@ -116,6 +116,75 @@ def test_put_subagents_config_rejects_unknown_default_role(monkeypatch):
     assert resp.status_code == 400
 
 
+def test_put_subagents_config_auto_sets_default_role_in_default_mode(monkeypatch):
+    client = _build_test_client(monkeypatch)
+    payload = client.get("/api/agent/subagents/config").json()
+    payload["role_selection_mode"] = "default"
+    payload["default_role"] = ""
+    payload["roles"] = [
+        {"key": "research", "name": "Research", "enabled": True},
+        {"key": "coding", "name": "Coding", "enabled": True},
+    ]
+
+    resp = client.put("/api/agent/subagents/config", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["default_role"] == "research"
+
+
+def test_put_subagents_config_rejects_disabled_default_role_in_default_mode(monkeypatch):
+    client = _build_test_client(monkeypatch)
+    payload = client.get("/api/agent/subagents/config").json()
+    payload["role_selection_mode"] = "default"
+    payload["default_role"] = "research"
+    payload["roles"] = [
+        {"key": "research", "name": "Research", "enabled": False},
+    ]
+
+    resp = client.put("/api/agent/subagents/config", json=payload)
+    assert resp.status_code == 400
+    assert "enabled role" in resp.json()["detail"]
+
+
+def test_get_subagents_config_repairs_legacy_keyword_mojibake(monkeypatch):
+    store = InMemorySubagentTaskStore()
+    conf_holder = {
+        "config": Config.model_validate(
+            {
+                "agents": {
+                    "subagents": {
+                        "auto_dispatch_keywords": [
+                            "parallel",
+                            "\u03b5\u0389\u0386\u03b8\u2018\u008c",
+                            "\u03b6\u0089\u0389\u03b9\u0087\u008f",
+                        ],
+                    },
+                },
+            },
+        ),
+    }
+    save_calls = {"count": 0}
+
+    def _load_config():
+        return conf_holder["config"]
+
+    def _save_config(config):
+        save_calls["count"] += 1
+        conf_holder["config"] = config
+
+    monkeypatch.setattr(subagents_router, "load_config", _load_config)
+    monkeypatch.setattr(subagents_router, "save_config", _save_config)
+    monkeypatch.setattr(subagents_router, "get_subagent_task_store", lambda: store)
+
+    app = FastAPI()
+    app.include_router(subagents_router.router, prefix="/api")
+    client = TestClient(app)
+
+    resp = client.get("/api/agent/subagents/config")
+    assert resp.status_code == 200
+    assert resp.json()["auto_dispatch_keywords"] == ["parallel", "并行", "批量"]
+    assert save_calls["count"] == 0
+
+
 def test_get_subagent_task_events(monkeypatch):
     client = _build_test_client(monkeypatch)
 

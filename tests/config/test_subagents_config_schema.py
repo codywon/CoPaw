@@ -1,4 +1,4 @@
-from copaw.config.config import AgentsConfig, SubagentRoleConfig
+from copaw.config.config import AgentsConfig, SubagentRoleConfig, SubagentsConfig
 
 
 def test_subagents_defaults_loaded():
@@ -21,3 +21,16 @@ def test_subagent_role_model_policy_defaults_loaded():
     assert role.max_tokens is None
     assert role.budget_limit_usd is None
     assert role.reasoning_effort == ""
+
+
+def test_subagents_keywords_mojibake_is_normalized():
+    cfg = SubagentsConfig(
+        auto_dispatch_keywords=[
+            "parallel",
+            "\u03b5\u0389\u0386\u03b8\u2018\u008c",
+            "\u03b6\u0089\u0389\u03b9\u0087\u008f",
+            "骞惰",
+            "鎵归噺",
+        ],
+    )
+    assert cfg.auto_dispatch_keywords == ["parallel", "并行", "批量"]

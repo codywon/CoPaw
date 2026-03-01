@@ -2,7 +2,7 @@ import {
   AgentScopeRuntimeWebUI,
   IAgentScopeRuntimeWebUIOptions,
 } from "@agentscope-ai/chat";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Button, Result } from "antd";
 import { ExclamationCircleOutlined, SettingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -11,8 +11,10 @@ import sessionApi from "./sessionApi";
 import { useLocalStorageState } from "ahooks";
 import defaultConfig, { DefaultConfig } from "./OptionsPanel/defaultConfig";
 import Weather from "./Weather";
+import api from "../../api";
 import { getApiUrl, getApiToken } from "../../api/config";
 import { providerApi } from "../../api/modules/provider";
+import { subscribeShowToolDetails } from "../../utils/showToolDetailsSync";
 import "./index.module.less";
 
 interface CustomWindow extends Window {
@@ -25,10 +27,93 @@ declare const window: CustomWindow;
 
 type OptionsConfig = DefaultConfig;
 
+const TOOL_PROCESS_MESSAGE_TYPES = new Set([
+  "plugin_call",
+  "plugin_call_output",
+  "function_call",
+  "function_call_output",
+  "component_call",
+  "component_call_output",
+  "mcp_call",
+  "mcp_call_output",
+]);
+
+function isObjectLike(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null;
+}
+
+function toHeartbeatEvent(event: Record<string, any>): Record<string, any> {
+  return {
+    object: "message",
+    type: "heartbeat",
+    id:
+      typeof event.id === "string" && event.id
+        ? event.id
+        : `heartbeat-${Date.now()}`,
+    role: "assistant",
+    status:
+      typeof event.status === "string" ? event.status : "in_progress",
+    content: [],
+  };
+}
+
+function filterToolProcessEvent(
+  event: unknown,
+  showToolDetails: boolean,
+  hiddenToolMessageIds: Set<string>,
+): unknown {
+  if (!isObjectLike(event)) return event;
+
+  if (showToolDetails) {
+    hiddenToolMessageIds.clear();
+    return event;
+  }
+
+  if (event.object === "message") {
+    const eventType = typeof event.type === "string" ? event.type : "";
+    if (TOOL_PROCESS_MESSAGE_TYPES.has(eventType)) {
+      if (typeof event.id === "string" && event.id) {
+        hiddenToolMessageIds.add(event.id);
+      }
+      return toHeartbeatEvent(event);
+    }
+    return event;
+  }
+
+  if (event.object === "content") {
+    const msgId = typeof event.msg_id === "string" ? event.msg_id : "";
+    if (msgId && hiddenToolMessageIds.has(msgId)) {
+      return toHeartbeatEvent({ id: msgId, status: event.status });
+    }
+    return event;
+  }
+
+  if (event.object === "response" && Array.isArray(event.output)) {
+    const filtered = {
+      ...event,
+      output: event.output.filter(
+        (item: any) => !TOOL_PROCESS_MESSAGE_TYPES.has(item?.type),
+      ),
+    };
+    if (
+      event.status === "completed" ||
+      event.status === "failed" ||
+      event.status === "canceled"
+    ) {
+      hiddenToolMessageIds.clear();
+    }
+    return filtered;
+  }
+
+  return event;
+}
+
 export default function ChatPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [showModelPrompt, setShowModelPrompt] = useState(false);
+  const showToolDetailsRef = useRef(true);
+  const hiddenToolMessageIdsRef = useRef<Set<string>>(new Set());
   const [optionsConfig] = useLocalStorageState<OptionsConfig>(
     "agent-scope-runtime-webui-options",
     {
@@ -45,6 +130,39 @@ export default function ChatPage() {
   const handleSkipConfiguration = () => {
     setShowModelPrompt(false);
   };
+
+  useEffect(() => {
+    const applyShowToolDetails = (value: boolean) => {
+      if (showToolDetailsRef.current !== value) {
+        hiddenToolMessageIdsRef.current.clear();
+      }
+      showToolDetailsRef.current = value;
+    };
+
+    const syncShowToolDetails = async () => {
+      try {
+        const result = await api.getShowToolDetails();
+        applyShowToolDetails(result.show_tool_details);
+      } catch (error) {
+        console.error("Failed to sync show_tool_details in chat:", error);
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        void syncShowToolDetails();
+      }
+    };
+
+    const unsubscribe = subscribeShowToolDetails(applyShowToolDetails);
+    void syncShowToolDetails();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      unsubscribe();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
 
   const options = useMemo(() => {
     const handleModelError = () => {
@@ -78,6 +196,8 @@ export default function ChatPage() {
         console.error("Failed to check model configuration:", error);
         return handleModelError();
       }
+
+      hiddenToolMessageIdsRef.current.clear();
 
       const { input, biz_params } = data;
 
@@ -126,6 +246,14 @@ export default function ChatPage() {
       api: {
         ...optionsConfig.api,
         fetch: customFetch,
+        responseParser: (chunk: string) => {
+          const parsed = JSON.parse(chunk);
+          return filterToolProcessEvent(
+            parsed,
+            showToolDetailsRef.current,
+            hiddenToolMessageIdsRef.current,
+          );
+        },
         cancel(data: { session_id: string }) {
           console.log(data);
         },

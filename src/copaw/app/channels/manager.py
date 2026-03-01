@@ -24,7 +24,7 @@ from .registry import get_channel_registry
 from ...constant import get_available_channels
 
 if TYPE_CHECKING:
-    from ....config.config import Config
+    from ...config.config import ChannelConfig, Config
 
 logger = logging.getLogger(__name__)
 
@@ -163,40 +163,27 @@ class ChannelManager:
         """Create channels from config (config.json)."""
         available = get_available_channels()
         ch = config.channels
-        show_tool_details = getattr(config, "show_tool_details", True)
-        extra = getattr(ch, "__pydantic_extra__", None) or {}
+        show_tool_details = config.show_tool_details
 
         channels: list[BaseChannel] = []
         for key, ch_cls in get_channel_registry().items():
             if key not in available:
                 continue
-            ch_cfg = getattr(ch, key, None)
-            if ch_cfg is None and key in extra:
+            ch_cfg = ch.get_channel_config(key)
+            if ch_cfg is not None and isinstance(ch_cfg, dict):
                 from types import SimpleNamespace
 
-                raw = extra[key]
-                ch_cfg = (
-                    SimpleNamespace(**raw) if isinstance(raw, dict) else raw
-                )
+                ch_cfg = SimpleNamespace(**ch_cfg)
             if ch_cfg is None:
                 continue
-            if key == "console":
-                channels.append(
-                    ch_cls.from_config(
-                        process,
-                        ch_cfg,
-                        on_reply_sent=on_last_dispatch,
-                    ),
-                )
-            else:
-                channels.append(
-                    ch_cls.from_config(
-                        process,
-                        ch_cfg,
-                        on_reply_sent=on_last_dispatch,
-                        show_tool_details=show_tool_details,
-                    ),
-                )
+            channels.append(
+                ch_cls.from_config(
+                    process,
+                    ch_cfg,
+                    on_reply_sent=on_last_dispatch,
+                    show_tool_details=show_tool_details,
+                ),
+            )
         return cls(channels)
 
     def _make_enqueue_cb(self, channel_id: str) -> Callable[[Any], None]:
@@ -424,6 +411,33 @@ class ChannelManager:
                     logger.exception(
                         f"Failed to stop old channel: {old_channel.channel}",
                     )
+
+    async def apply_show_tool_details(
+        self,
+        channels_cfg: "ChannelConfig",
+        show_tool_details: bool,
+    ) -> None:
+        """Clone+replace all channels with an updated show_tool_details flag."""
+        from ...constant import get_available_channels
+
+        for name in get_available_channels():
+            ch_cfg = channels_cfg.get_channel_config(name)
+            if ch_cfg is None:
+                continue
+            try:
+                old_channel = await self.get_channel(name)
+                if old_channel is None:
+                    continue
+                new_channel = old_channel.clone(
+                    ch_cfg,
+                    show_tool_details=show_tool_details,
+                )
+                await self.replace_channel(new_channel)
+            except Exception:
+                logger.exception(
+                    "Failed to apply show_tool_details to channel '%s'",
+                    name,
+                )
 
     async def send_event(
         self,

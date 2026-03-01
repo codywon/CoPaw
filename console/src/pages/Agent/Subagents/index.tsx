@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { DeleteOutlined } from "@ant-design/icons";
 import {
   Alert,
   Button,
@@ -23,6 +24,7 @@ import type {
   SubagentModelProviderOption,
   SkillSpec,
   SubagentRoleConfig,
+  SubagentRoleSelectionMode,
   SubagentTask,
   SubagentTaskEvent,
   SubagentTaskStatus,
@@ -211,58 +213,15 @@ function resolveTemplateModelDefaults(
   | "budget_limit_usd"
   | "reasoning_effort"
 > {
-  const providerMap = new Map(modelProviders.map((provider) => [provider.id, provider]));
-
-  const preferredProvider = template.model_provider.trim();
-  let selectedProvider = "";
-  if (preferredProvider && providerMap.has(preferredProvider)) {
-    selectedProvider = preferredProvider;
-  } else if (activeProviderId && providerMap.has(activeProviderId)) {
-    selectedProvider = activeProviderId;
-  } else if (modelProviders.length > 0) {
-    selectedProvider = modelProviders[0].id;
-  }
-
-  const selectedProviderModels =
-    selectedProvider && providerMap.has(selectedProvider)
-      ? providerMap.get(selectedProvider)?.models || []
-      : [];
-
-  const preferredModel = template.model_name.trim();
-  const activeModelAllowed =
-    selectedProvider === activeProviderId && !!activeModel.trim()
-      ? activeModel.trim()
-      : "";
-  const selectedModelCandidates = [
-    preferredModel,
-    activeModelAllowed,
-    selectedProviderModels[0]?.id || "",
-  ];
-  const selectedModel =
-    selectedModelCandidates.find(
-      (candidate) =>
-        candidate &&
-        selectedProviderModels.some((model) => model.id === candidate),
-    ) || "";
-
-  let fallbackModels = template.fallback_models.filter(
-    (modelId) =>
-      !!modelId &&
-      modelId !== selectedModel &&
-      selectedProviderModels.some((model) => model.id === modelId),
-  );
-
-  if (fallbackModels.length === 0 && selectedProviderModels.length > 1) {
-    fallbackModels = selectedProviderModels
-      .map((model) => model.id)
-      .filter((modelId) => modelId && modelId !== selectedModel)
-      .slice(0, 2);
-  }
+  void modelProviders;
+  void activeProviderId;
+  void activeModel;
 
   return {
-    model_provider: selectedProvider,
-    model_name: selectedModel,
-    fallback_models: fallbackModels,
+    // Default to inheritance from main agent model policy.
+    model_provider: "",
+    model_name: "",
+    fallback_models: [],
     max_tokens: template.max_tokens ?? null,
     budget_limit_usd: template.budget_limit_usd ?? null,
     reasoning_effort: template.reasoning_effort,
@@ -321,11 +280,17 @@ function SubagentsPage() {
   const [form] = Form.useForm<SubagentsConfig>();
   const roleValues =
     (Form.useWatch("roles", form) as Array<Partial<SubagentRoleConfig>> | undefined) || [];
+  const roleSelectionMode =
+    (Form.useWatch("role_selection_mode", form) as
+      | SubagentRoleSelectionMode
+      | undefined) || "auto";
+  const defaultRoleValue = (Form.useWatch("default_role", form) as string | undefined) || "";
 
   const [activeTab, setActiveTab] = useState("config");
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
+  const [activeRoleIndex, setActiveRoleIndex] = useState<number | null>(null);
 
   const [mcpOptions, setMcpOptions] = useState<string[]>([]);
   const [skillOptions, setSkillOptions] = useState<string[]>([]);
@@ -565,6 +530,24 @@ function SubagentsPage() {
     [roleValues],
   );
 
+  useEffect(() => {
+    if (roleSelectionMode !== "default") return;
+    const current = defaultRoleValue.trim();
+    const exists = roleOptions.some((option) => option.value === current);
+    if (exists) return;
+    form.setFieldValue("default_role", roleOptions[0]?.value || "");
+  }, [defaultRoleValue, form, roleOptions, roleSelectionMode]);
+
+  useEffect(() => {
+    setActiveRoleIndex((prev) => {
+      const count = roleValues.length;
+      if (count === 0) return null;
+      if (prev === null || prev < 0) return 0;
+      if (prev >= count) return count - 1;
+      return prev;
+    });
+  }, [roleValues.length]);
+
   const providerOptions = useMemo(
     () =>
       modelProviderOptions.map((provider) => ({
@@ -602,6 +585,16 @@ function SubagentsPage() {
       modelProviderOptions,
       roleValues,
     ],
+  );
+
+  const policyOptions = useMemo(
+    () => [
+      { value: "inherit", label: t("subagents.policy.inherit") },
+      { value: "none", label: t("subagents.policy.none") },
+      { value: "selected", label: t("subagents.policy.selected") },
+      { value: "all", label: t("subagents.policy.all") },
+    ],
+    [t],
   );
 
   const tabItems: TabsProps["items"] = [
@@ -690,9 +683,28 @@ function SubagentsPage() {
                 />
               </Form.Item>
               <Form.Item label={t("subagents.defaultRole")} name="default_role">
-                <Select allowClear options={roleOptions} />
+                <Select
+                  allowClear
+                  options={roleOptions}
+                  disabled={roleSelectionMode !== "default" || roleOptions.length === 0}
+                  placeholder={
+                    roleOptions.length === 0
+                      ? t("subagents.defaultRoleNoRolesPlaceholder")
+                      : roleSelectionMode !== "default"
+                        ? t("subagents.defaultRoleDisabledPlaceholder")
+                        : undefined
+                  }
+                />
               </Form.Item>
             </div>
+            {roleOptions.length === 0 && (
+              <Alert
+                style={{ marginBottom: 12 }}
+                type="info"
+                showIcon
+                message={t("subagents.defaultRoleNeedsRoles")}
+              />
+            )}
 
             <Form.Item label={t("subagents.allowedPaths")} name="allowed_paths">
               <Select mode="tags" tokenSeparators={[","]} />
@@ -728,123 +740,179 @@ function SubagentsPage() {
                     showIcon
                     message={t("subagents.rolesHint")}
                   />
-                  <div className={styles.actions}>
-                    <Button
-                      type="dashed"
-                      onClick={() => add(defaultRoleDraft)}
-                    >
-                      {t("subagents.addRole")}
-                    </Button>
+                  <div className={styles.rolesLayout}>
+                    <div className={styles.rolesSidebar}>
+                      <div className={styles.rolesSidebarHeader}>
+                        <Button
+                          type="dashed"
+                          block
+                          onClick={() => {
+                            add(defaultRoleDraft);
+                            setActiveRoleIndex(fields.length);
+                          }}
+                        >
+                          {t("subagents.addRole")}
+                        </Button>
+                      </div>
+                      <div className={styles.rolesSidebarList}>
+                        {fields.length === 0 && (
+                          <div className={styles.rolesSidebarEmpty}>
+                            {t("subagents.defaultRoleNeedsRoles")}
+                          </div>
+                        )}
+                        {fields.map((field, idx) => {
+                          const role = roleValues[idx] || {};
+                          const isActive = idx === (activeRoleIndex ?? 0);
+                          const isEnabled = role.enabled !== false;
+                          const roleName =
+                            (role.name || "").trim() ||
+                            `${t("subagents.roleCardTitle")} #${idx + 1}`;
+                          const roleKey = (role.key || "").trim() || `#${idx + 1}`;
+                          return (
+                            <div
+                              key={field.key}
+                              className={`${styles.roleNavItem} ${isActive ? styles.roleNavItemActive : ""}`}
+                              onClick={() => setActiveRoleIndex(idx)}
+                            >
+                              <div className={styles.roleNavMain}>
+                                <div className={styles.roleNavName}>{roleName}</div>
+                                <div className={styles.roleNavKey}>{roleKey}</div>
+                              </div>
+                              <div className={styles.roleNavTail}>
+                                <span className={styles.roleNavEnabled}>
+                                  <span
+                                    className={`${styles.roleStatusDot} ${isEnabled ? styles.roleStatusDotEnabled : styles.roleStatusDotDisabled}`}
+                                    title={isEnabled ? t("subagents.yes") : t("subagents.no")}
+                                  />
+                                </span>
+                                <Button
+                                  danger
+                                  type="text"
+                                  size="small"
+                                  icon={<DeleteOutlined />}
+                                  aria-label={t("common.delete")}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    remove(field.name);
+                                    setActiveRoleIndex((prev) => {
+                                      if (prev === null) return null;
+                                      if (prev > idx) return prev - 1;
+                                      if (prev === idx) return Math.max(0, idx - 1);
+                                      return prev;
+                                    });
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className={styles.rolesDetail}>
+                      {fields.length > 0 && (() => {
+                        const selectedIndex = Math.min(
+                          activeRoleIndex ?? 0,
+                          fields.length - 1,
+                        );
+                        const selectedField = fields[selectedIndex];
+                        const roleProviderId = (
+                          (roleValues[selectedIndex]?.model_provider as string) || ""
+                        ).trim();
+                        const roleModelOptions = roleProviderId
+                          ? (modelsByProvider[roleProviderId] || [])
+                          : [];
+
+                        return (
+                          <Card
+                            size="small"
+                            title={`${t("subagents.roleCardTitle")} #${selectedIndex + 1}`}
+                          >
+                            <div className={styles.grid2}>
+                              <Form.Item label={t("subagents.roleKey")} name={[selectedField.name, "key"]}>
+                                <Input placeholder="research_agent" />
+                              </Form.Item>
+                              <Form.Item label={t("subagents.roleName")} name={[selectedField.name, "name"]}>
+                                <Input placeholder={t("subagents.roleNamePlaceholder")} />
+                              </Form.Item>
+                            </div>
+                            <Form.Item label={t("subagents.roleEnabled")} name={[selectedField.name, "enabled"]} valuePropName="checked">
+                              <Switch />
+                            </Form.Item>
+                            <Form.Item label={t("subagents.roleDescription")} name={[selectedField.name, "description"]}>
+                              <Input.TextArea rows={2} />
+                            </Form.Item>
+                            <Form.Item label={t("subagents.roleIdentityPrompt")} name={[selectedField.name, "identity_prompt"]}>
+                              <Input.TextArea rows={3} />
+                            </Form.Item>
+                            <Form.Item label={t("subagents.roleToolGuidelines")} name={[selectedField.name, "tool_guidelines"]}>
+                              <Input.TextArea rows={3} />
+                            </Form.Item>
+                            <Form.Item label={t("subagents.roleRoutingKeywords")} name={[selectedField.name, "routing_keywords"]}>
+                              <Select mode="tags" tokenSeparators={[","]} />
+                            </Form.Item>
+                            <Form.Item label={t("subagents.roleToolAllowlist")} name={[selectedField.name, "tool_allowlist"]}>
+                              <Select mode="tags" tokenSeparators={[","]} />
+                            </Form.Item>
+
+                            <Alert
+                              style={{ marginBottom: 12 }}
+                              type="info"
+                              showIcon
+                              message={t("subagents.roleModelPolicyHint")}
+                            />
+                            <div className={styles.grid2}>
+                              <Form.Item label={t("subagents.roleModelProvider")} name={[selectedField.name, "model_provider"]}>
+                                <Select allowClear options={providerOptions} />
+                              </Form.Item>
+                              <Form.Item label={t("subagents.roleModelName")} name={[selectedField.name, "model_name"]}>
+                                <Select allowClear showSearch options={roleModelOptions} />
+                              </Form.Item>
+                            </div>
+                            <Form.Item label={t("subagents.roleFallbackModels")} name={[selectedField.name, "fallback_models"]}>
+                              <Select mode="multiple" showSearch options={roleModelOptions} />
+                            </Form.Item>
+                            <div className={styles.grid3}>
+                              <Form.Item label={t("subagents.roleMaxTokens")} name={[selectedField.name, "max_tokens"]}>
+                                <InputNumber min={1} style={{ width: "100%" }} />
+                              </Form.Item>
+                              <Form.Item label={t("subagents.roleBudgetLimitUsd")} name={[selectedField.name, "budget_limit_usd"]}>
+                                <InputNumber min={0} step={0.01} style={{ width: "100%" }} />
+                              </Form.Item>
+                              <Form.Item label={t("subagents.roleReasoningEffort")} name={[selectedField.name, "reasoning_effort"]}>
+                                <Select
+                                  allowClear
+                                  options={[
+                                    { value: "low", label: t("subagents.reasoning.low") },
+                                    { value: "medium", label: t("subagents.reasoning.medium") },
+                                    { value: "high", label: t("subagents.reasoning.high") },
+                                  ]}
+                                />
+                              </Form.Item>
+                            </div>
+
+                            <div className={styles.grid2}>
+                              <Form.Item label={t("subagents.roleMcpPolicy")} name={[selectedField.name, "mcp_policy"]}>
+                                <Select
+                                  options={policyOptions}
+                                />
+                              </Form.Item>
+                              <Form.Item label={t("subagents.roleSkillsPolicy")} name={[selectedField.name, "skills_policy"]}>
+                                <Select
+                                  options={policyOptions}
+                                />
+                              </Form.Item>
+                            </div>
+                            <Form.Item label={t("subagents.mcpSelected")} name={[selectedField.name, "mcp_selected"]}>
+                              <Select mode="tags" options={mcpOptions.map((v) => ({ value: v, label: v }))} />
+                            </Form.Item>
+                            <Form.Item label={t("subagents.skillsSelected")} name={[selectedField.name, "skills_selected"]}>
+                              <Select mode="tags" options={skillOptions.map((v) => ({ value: v, label: v }))} />
+                            </Form.Item>
+                          </Card>
+                        );
+                      })()}
+                    </div>
                   </div>
-                  {fields.map((field, idx) => {
-                    const roleProviderId = ((roleValues[idx]?.model_provider as string) || "").trim();
-                    const roleModelOptions = roleProviderId ? (modelsByProvider[roleProviderId] || []) : [];
-                    return (
-                      <Card
-                        key={field.key}
-                        size="small"
-                        style={{ marginBottom: 12 }}
-                        title={`${t("subagents.roleCardTitle")} #${idx + 1}`}
-                        extra={
-                          <Button danger type="link" onClick={() => remove(field.name)}>
-                            {t("common.delete")}
-                          </Button>
-                        }
-                      >
-                        <div className={styles.grid2}>
-                          <Form.Item label={t("subagents.roleKey")} name={[field.name, "key"]}>
-                            <Input placeholder="research_agent" />
-                          </Form.Item>
-                          <Form.Item label={t("subagents.roleName")} name={[field.name, "name"]}>
-                            <Input placeholder={t("subagents.roleNamePlaceholder")} />
-                          </Form.Item>
-                        </div>
-                        <Form.Item label={t("subagents.roleEnabled")} name={[field.name, "enabled"]} valuePropName="checked">
-                          <Switch />
-                        </Form.Item>
-                        <Form.Item label={t("subagents.roleDescription")} name={[field.name, "description"]}>
-                          <Input.TextArea rows={2} />
-                        </Form.Item>
-                        <Form.Item label={t("subagents.roleIdentityPrompt")} name={[field.name, "identity_prompt"]}>
-                          <Input.TextArea rows={3} />
-                        </Form.Item>
-                        <Form.Item label={t("subagents.roleToolGuidelines")} name={[field.name, "tool_guidelines"]}>
-                          <Input.TextArea rows={3} />
-                        </Form.Item>
-                        <Form.Item label={t("subagents.roleRoutingKeywords")} name={[field.name, "routing_keywords"]}>
-                          <Select mode="tags" tokenSeparators={[","]} />
-                        </Form.Item>
-                        <Form.Item label={t("subagents.roleToolAllowlist")} name={[field.name, "tool_allowlist"]}>
-                          <Select mode="tags" tokenSeparators={[","]} />
-                        </Form.Item>
-
-                        <Alert
-                          style={{ marginBottom: 12 }}
-                          type="info"
-                          showIcon
-                          message={t("subagents.roleModelPolicyHint")}
-                        />
-                        <div className={styles.grid2}>
-                          <Form.Item label={t("subagents.roleModelProvider")} name={[field.name, "model_provider"]}>
-                            <Select allowClear options={providerOptions} />
-                          </Form.Item>
-                          <Form.Item label={t("subagents.roleModelName")} name={[field.name, "model_name"]}>
-                            <Select allowClear showSearch options={roleModelOptions} />
-                          </Form.Item>
-                        </div>
-                        <Form.Item label={t("subagents.roleFallbackModels")} name={[field.name, "fallback_models"]}>
-                          <Select mode="multiple" showSearch options={roleModelOptions} />
-                        </Form.Item>
-                        <div className={styles.grid3}>
-                          <Form.Item label={t("subagents.roleMaxTokens")} name={[field.name, "max_tokens"]}>
-                            <InputNumber min={1} style={{ width: "100%" }} />
-                          </Form.Item>
-                          <Form.Item label={t("subagents.roleBudgetLimitUsd")} name={[field.name, "budget_limit_usd"]}>
-                            <InputNumber min={0} step={0.01} style={{ width: "100%" }} />
-                          </Form.Item>
-                          <Form.Item label={t("subagents.roleReasoningEffort")} name={[field.name, "reasoning_effort"]}>
-                            <Select
-                              allowClear
-                              options={[
-                                { value: "low", label: t("subagents.reasoning.low") },
-                                { value: "medium", label: t("subagents.reasoning.medium") },
-                                { value: "high", label: t("subagents.reasoning.high") },
-                              ]}
-                            />
-                          </Form.Item>
-                        </div>
-
-                        <div className={styles.grid2}>
-                          <Form.Item label={t("subagents.roleMcpPolicy")} name={[field.name, "mcp_policy"]}>
-                            <Select
-                              options={[
-                                { value: "inherit", label: t("subagents.policy.inherit") },
-                                { value: "none", label: t("subagents.policy.none") },
-                                { value: "selected", label: t("subagents.policy.selected") },
-                                { value: "all", label: t("subagents.policy.all") },
-                              ]}
-                            />
-                          </Form.Item>
-                          <Form.Item label={t("subagents.roleSkillsPolicy")} name={[field.name, "skills_policy"]}>
-                            <Select
-                              options={[
-                                { value: "inherit", label: t("subagents.policy.inherit") },
-                                { value: "none", label: t("subagents.policy.none") },
-                                { value: "selected", label: t("subagents.policy.selected") },
-                                { value: "all", label: t("subagents.policy.all") },
-                              ]}
-                            />
-                          </Form.Item>
-                        </div>
-                        <Form.Item label={t("subagents.mcpSelected")} name={[field.name, "mcp_selected"]}>
-                          <Select mode="tags" options={mcpOptions.map((v) => ({ value: v, label: v }))} />
-                        </Form.Item>
-                        <Form.Item label={t("subagents.skillsSelected")} name={[field.name, "skills_selected"]}>
-                          <Select mode="tags" options={skillOptions.map((v) => ({ value: v, label: v }))} />
-                        </Form.Item>
-                      </Card>
-                    );
-                  })}
                 </>
               )}
             </Form.List>

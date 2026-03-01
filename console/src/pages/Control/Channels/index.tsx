@@ -11,6 +11,7 @@ import {
   CHANNEL_LABELS,
   type ChannelKey,
 } from "./components";
+import { publishShowToolDetails } from "../../../utils/showToolDetailsSync";
 import styles from "./index.module.less";
 
 function ChannelsPage() {
@@ -123,6 +124,7 @@ function ChannelsPage() {
     try {
       const result = await api.updateShowToolDetails(checked);
       setShowToolDetails(result.show_tool_details);
+      publishShowToolDetails(result.show_tool_details);
       message.success(t("channels.showToolDetailsSaved"));
     } catch (error) {
       console.error("Failed to update show_tool_details:", error);

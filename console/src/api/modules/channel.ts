@@ -31,7 +31,9 @@ export const channelApi = {
     ),
 
   getShowToolDetails: () =>
-    request<ShowToolDetailsConfig>("/config/show-tool-details"),
+    request<ShowToolDetailsConfig>("/config/show-tool-details", {
+      cache: "no-store",
+    }),
 
   updateShowToolDetails: (showToolDetails: boolean) =>
     request<ShowToolDetailsConfig>("/config/show-tool-details", {
