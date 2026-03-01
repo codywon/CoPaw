@@ -75,8 +75,13 @@ class SubagentManager:
         write_mode: str = "worktree",
         allowed_paths: Optional[list[str]] = None,
         retry_max_attempts: int = 1,
+        selected_model_provider: str = "",
+        selected_model_name: str = "",
+        reasoning_effort: str = "",
+        model_fallback_used: bool = False,
+        cost_estimate_usd: Optional[float] = None,
     ) -> str:
-        return self._store.create_task(
+        task_id = self._store.create_task(
             parent_session_id=parent_session_id,
             task_prompt=task_prompt,
             origin_user_id=origin_user_id,
@@ -88,7 +93,30 @@ class SubagentManager:
             write_mode=write_mode,
             allowed_paths=allowed_paths,
             max_attempts=max(1, int(retry_max_attempts)),
+            selected_model_provider=selected_model_provider,
+            selected_model_name=selected_model_name,
+            reasoning_effort=reasoning_effort,
+            model_fallback_used=model_fallback_used,
+            cost_estimate_usd=cost_estimate_usd,
         )
+        if selected_model_provider or selected_model_name:
+            self._store.append_event(
+                task_id,
+                event_type="model_selected",
+                summary=(
+                    "Model selected: "
+                    f"{selected_model_provider or '(provider-missing)'}/"
+                    f"{selected_model_name or '(model-missing)'}"
+                ),
+                payload={
+                    "provider": selected_model_provider,
+                    "model": selected_model_name,
+                    "reasoning_effort": reasoning_effort,
+                    "fallback_used": bool(model_fallback_used),
+                    "cost_estimate_usd": cost_estimate_usd,
+                },
+            )
+        return task_id
 
     async def run_task(
         self,
@@ -107,6 +135,11 @@ class SubagentManager:
         allowed_paths: Optional[list[str]] = None,
         retry_max_attempts: int = 1,
         retry_backoff_seconds: int = 0,
+        selected_model_provider: str = "",
+        selected_model_name: str = "",
+        reasoning_effort: str = "",
+        model_fallback_used: bool = False,
+        cost_estimate_usd: Optional[float] = None,
     ) -> SubagentTask:
         """Create and execute one subagent task synchronously."""
         task_id = self._create_task_record(
@@ -121,6 +154,11 @@ class SubagentManager:
             write_mode=write_mode,
             allowed_paths=allowed_paths,
             retry_max_attempts=retry_max_attempts,
+            selected_model_provider=selected_model_provider,
+            selected_model_name=selected_model_name,
+            reasoning_effort=reasoning_effort,
+            model_fallback_used=model_fallback_used,
+            cost_estimate_usd=cost_estimate_usd,
         )
         return await self._execute_task(
             task_id=task_id,
@@ -147,6 +185,11 @@ class SubagentManager:
         allowed_paths: Optional[list[str]] = None,
         retry_max_attempts: int = 1,
         retry_backoff_seconds: int = 0,
+        selected_model_provider: str = "",
+        selected_model_name: str = "",
+        reasoning_effort: str = "",
+        model_fallback_used: bool = False,
+        cost_estimate_usd: Optional[float] = None,
     ) -> SubagentTask:
         """Queue one subagent task and return queued snapshot immediately."""
         task_id = self._create_task_record(
@@ -161,6 +204,11 @@ class SubagentManager:
             write_mode=write_mode,
             allowed_paths=allowed_paths,
             retry_max_attempts=retry_max_attempts,
+            selected_model_provider=selected_model_provider,
+            selected_model_name=selected_model_name,
+            reasoning_effort=reasoning_effort,
+            model_fallback_used=model_fallback_used,
+            cost_estimate_usd=cost_estimate_usd,
         )
         bg_task = asyncio.create_task(
             self._execute_task(
@@ -254,6 +302,15 @@ class SubagentManager:
                             if backoff_seconds > 0:
                                 await asyncio.sleep(backoff_seconds)
                             continue
+                        self._store.append_event(
+                            task_id,
+                            event_type="error",
+                            summary=(
+                                "Task timed out after "
+                                f"{task_timeout} seconds"
+                            ),
+                            payload={"attempt": attempt},
+                        )
                         snapshot = self._store.set_status(
                             task_id,
                             "timeout",
@@ -270,6 +327,12 @@ class SubagentManager:
                             if backoff_seconds > 0:
                                 await asyncio.sleep(backoff_seconds)
                             continue
+                        self._store.append_event(
+                            task_id,
+                            event_type="error",
+                            summary=f"Task failed: {exc}",
+                            payload={"attempt": attempt},
+                        )
                         snapshot = self._store.set_status(
                             task_id,
                             "error",

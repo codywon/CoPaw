@@ -1,7 +1,9 @@
 import { request } from "../request";
 import type {
+  SubagentRoleModelOptionsResponse,
   SubagentsConfig,
   SubagentTask,
+  SubagentTaskEventListResponse,
   SubagentTaskListResponse,
 } from "../types";
 
@@ -36,6 +38,16 @@ export const subagentsApi = {
 
   getSubagentTask: (taskId: string) =>
     request<SubagentTask>(`/agent/subagents/tasks/${encodeURIComponent(taskId)}`),
+
+  getSubagentTaskEvents: (taskId: string) =>
+    request<SubagentTaskEventListResponse>(
+      `/agent/subagents/tasks/${encodeURIComponent(taskId)}/events`,
+    ),
+
+  getSubagentRoleModelOptions: () =>
+    request<SubagentRoleModelOptionsResponse>(
+      "/agent/subagents/roles/model-options",
+    ),
 
   cancelSubagentTask: (taskId: string) =>
     request<SubagentTask>(

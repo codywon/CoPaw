@@ -1,4 +1,4 @@
-from copaw.config.config import AgentsConfig
+from copaw.config.config import AgentsConfig, SubagentRoleConfig
 
 
 def test_subagents_defaults_loaded():
@@ -11,3 +11,13 @@ def test_subagents_defaults_loaded():
     assert cfg.subagents.retry_max_attempts == 1
     assert "web_search" in cfg.subagents.tools.default_enabled
     assert "web_fetch" in cfg.subagents.tools.default_enabled
+
+
+def test_subagent_role_model_policy_defaults_loaded():
+    role = SubagentRoleConfig(key="research", name="Research Agent")
+    assert role.model_provider == ""
+    assert role.model_name == ""
+    assert role.fallback_models == []
+    assert role.max_tokens is None
+    assert role.budget_limit_usd is None
+    assert role.reasoning_effort == ""

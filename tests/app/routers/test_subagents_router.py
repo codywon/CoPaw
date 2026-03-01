@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from copaw.agents.subagents.store import InMemorySubagentTaskStore
 from copaw.app.routers import subagents as subagents_router
 from copaw.config.config import Config
+from copaw.providers.models import ModelInfo, ModelSlotConfig, ProviderDefinition, ProvidersData
 
 
 def _build_test_client(monkeypatch) -> TestClient:
@@ -113,3 +114,57 @@ def test_put_subagents_config_rejects_unknown_default_role(monkeypatch):
 
     resp = client.put("/api/agent/subagents/config", json=payload)
     assert resp.status_code == 400
+
+
+def test_get_subagent_task_events(monkeypatch):
+    client = _build_test_client(monkeypatch)
+
+    store = subagents_router.get_subagent_task_store()
+    task_id = store.create_task(parent_session_id="s1", task_prompt="test")
+    store.set_status(task_id, "running")
+    store.set_status(task_id, "success", result_summary="ok")
+
+    resp = client.get(f"/api/agent/subagents/tasks/{task_id}/events")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["task_id"] == task_id
+    assert len(payload["items"]) >= 3
+    assert payload["items"][0]["type"] == "status_change"
+
+
+def test_get_model_options(monkeypatch):
+    client = _build_test_client(monkeypatch)
+
+    providers = [
+        ProviderDefinition(
+            id="openai",
+            name="OpenAI",
+            models=[ModelInfo(id="gpt-5-chat", name="GPT-5 Chat")],
+        ),
+        ProviderDefinition(
+            id="ollama",
+            name="Ollama",
+            is_local=True,
+            models=[ModelInfo(id="qwen3:8b", name="qwen3:8b")],
+        ),
+    ]
+
+    providers_data = ProvidersData(
+        active_llm=ModelSlotConfig(provider_id="openai", model="gpt-5-chat"),
+    )
+
+    monkeypatch.setattr(subagents_router, "list_providers", lambda: providers)
+    monkeypatch.setattr(
+        subagents_router,
+        "load_providers_json",
+        lambda: providers_data,
+    )
+
+    resp = client.get("/api/agent/subagents/roles/model-options")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["active_provider_id"] == "openai"
+    assert body["active_model"] == "gpt-5-chat"
+    assert len(body["providers"]) == 2
+    assert body["providers"][0]["id"] == "openai"
+    assert body["providers"][0]["models"][0]["id"] == "gpt-5-chat"

@@ -157,6 +157,12 @@ class SubagentRoleConfig(BaseModel):
     routing_keywords: List[str] = Field(default_factory=list)
     tool_allowlist: List[str] = Field(default_factory=list)
     timeout_seconds: Optional[int] = Field(default=None, ge=1)
+    model_provider: str = ""
+    model_name: str = ""
+    fallback_models: List[str] = Field(default_factory=list)
+    max_tokens: Optional[int] = Field(default=None, ge=1)
+    budget_limit_usd: Optional[float] = Field(default=None, ge=0)
+    reasoning_effort: str = ""
     mcp_policy: SubagentRolePolicy = "inherit"
     mcp_selected: List[str] = Field(default_factory=list)
     skills_policy: SubagentRolePolicy = "inherit"

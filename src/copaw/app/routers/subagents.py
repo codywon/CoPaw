@@ -6,12 +6,17 @@ from typing import Optional
 from fastapi import APIRouter, Body, HTTPException, Path, Query
 
 from ...agents.subagents import (
+    SubagentModelOption,
+    SubagentModelProviderOption,
     SubagentManager,
+    SubagentRoleModelOptionsResponse,
     SubagentTask,
+    SubagentTaskEventListResponse,
     SubagentTaskListResponse,
     get_subagent_task_store,
 )
 from ...config import load_config, save_config, SubagentsConfig
+from ...providers import list_providers, load_providers_json
 
 router = APIRouter(prefix="/agent/subagents", tags=["subagents"])
 
@@ -72,6 +77,24 @@ def _validate_subagents_config(config: SubagentsConfig) -> SubagentsConfig:
         role.description = role.description.strip()
         role.identity_prompt = role.identity_prompt.strip()
         role.tool_guidelines = role.tool_guidelines.strip()
+        role.model_provider = role.model_provider.strip()
+        role.model_name = role.model_name.strip()
+        role.reasoning_effort = role.reasoning_effort.strip()
+
+        normalized_fallback_models: list[str] = []
+        seen_fallback_models: set[str] = set()
+        for model_name in role.fallback_models:
+            candidate = model_name.strip()
+            if not candidate:
+                continue
+            lower_candidate = candidate.lower()
+            if lower_candidate in seen_fallback_models:
+                continue
+            if role.model_name and lower_candidate == role.model_name.lower():
+                continue
+            normalized_fallback_models.append(candidate)
+            seen_fallback_models.add(lower_candidate)
+        role.fallback_models = normalized_fallback_models
 
         normalized_role_keywords: list[str] = []
         seen_role_keywords: set[str] = set()
@@ -204,3 +227,60 @@ async def cancel_subagent_task(
     if cancelled is None:
         raise HTTPException(status_code=404, detail="Subagent task not found")
     return cancelled
+
+
+@router.get(
+    "/tasks/{task_id}/events",
+    response_model=SubagentTaskEventListResponse,
+    summary="Get subagent task events",
+)
+async def get_subagent_task_events(
+    task_id: str = Path(..., min_length=1),
+) -> SubagentTaskEventListResponse:
+    store = get_subagent_task_store()
+    task = store.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Subagent task not found")
+    return SubagentTaskEventListResponse(
+        task_id=task_id,
+        items=store.list_task_events(task_id),
+    )
+
+
+@router.get(
+    "/roles/model-options",
+    response_model=SubagentRoleModelOptionsResponse,
+    summary="Get available model options for subagent roles",
+)
+async def get_subagent_role_model_options() -> SubagentRoleModelOptionsResponse:
+    data = load_providers_json()
+    providers: list[SubagentModelProviderOption] = []
+    for provider in list_providers():
+        models = list(provider.models)
+        settings = data.providers.get(provider.id)
+        if settings is not None and settings.extra_models:
+            existing = {m.id for m in models}
+            for extra in settings.extra_models:
+                if extra.id in existing:
+                    continue
+                models.append(extra)
+                existing.add(extra.id)
+
+        providers.append(
+            SubagentModelProviderOption(
+                id=provider.id,
+                name=provider.name,
+                is_local=provider.is_local,
+                has_api_key=data.is_configured(provider),
+                models=[
+                    SubagentModelOption(id=model.id, name=model.name)
+                    for model in models
+                ],
+            ),
+        )
+
+    return SubagentRoleModelOptionsResponse(
+        active_provider_id=data.active_llm.provider_id,
+        active_model=data.active_llm.model,
+        providers=providers,
+    )

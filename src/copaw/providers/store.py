@@ -330,6 +330,20 @@ def get_active_llm_config() -> Optional[ResolvedModelConfig]:
     return _resolve_slot(data.active_llm, data)
 
 
+def resolve_llm_config(
+    provider_id: str,
+    model: str,
+    data: Optional[ProvidersData] = None,
+) -> Optional[ResolvedModelConfig]:
+    """Resolve provider/model to runtime config without mutating active_llm."""
+    if data is None:
+        data = load_providers_json()
+    return _resolve_slot(
+        ModelSlotConfig(provider_id=provider_id, model=model),
+        data,
+    )
+
+
 # -- Utilities --
 
 

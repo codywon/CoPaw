@@ -13,15 +13,18 @@ import {
   Switch,
   Table,
   Tabs,
+  Timeline,
 } from "antd";
 import type { TableColumnsType, TabsProps } from "antd";
 import { useTranslation } from "react-i18next";
 import api from "../../../api";
 import type {
   MCPClientInfo,
+  SubagentModelProviderOption,
   SkillSpec,
   SubagentRoleConfig,
   SubagentTask,
+  SubagentTaskEvent,
   SubagentTaskStatus,
   SubagentsConfig,
 } from "../../../api/types";
@@ -57,9 +60,25 @@ function formatDuration(ms?: number | null): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function formatCost(value?: number | null): string {
+  if (value === null || value === undefined) return "-";
+  return `$${value.toFixed(4)}`;
+}
+
 type RoleTemplate = Pick<
   SubagentRoleConfig,
-  "key" | "name" | "description" | "identity_prompt" | "tool_guidelines" | "routing_keywords"
+  | "key"
+  | "name"
+  | "description"
+  | "identity_prompt"
+  | "tool_guidelines"
+  | "routing_keywords"
+  | "model_provider"
+  | "model_name"
+  | "fallback_models"
+  | "max_tokens"
+  | "budget_limit_usd"
+  | "reasoning_effort"
 >;
 
 const ROLE_TEMPLATES: Record<"en" | "zh", RoleTemplate[]> = {
@@ -74,6 +93,12 @@ const ROLE_TEMPLATES: Record<"en" | "zh", RoleTemplate[]> = {
       tool_guidelines:
         "Prefer web_search/web_fetch and read-only tools first. Keep write actions minimal and only when explicitly required.",
       routing_keywords: ["research", "analyze", "collect", "summary", "report"],
+      model_provider: "openai",
+      model_name: "gpt-5-chat",
+      fallback_models: ["gpt-5-mini"],
+      max_tokens: 8192,
+      budget_limit_usd: 2,
+      reasoning_effort: "high",
     },
     {
       key: "coding_agent",
@@ -85,6 +110,12 @@ const ROLE_TEMPLATES: Record<"en" | "zh", RoleTemplate[]> = {
       tool_guidelines:
         "Use read_file/edit_file/write_file and execute_shell_command for tests/build. Run verification before completion.",
       routing_keywords: ["code", "implement", "bugfix", "refactor", "test"],
+      model_provider: "openai",
+      model_name: "gpt-5-chat",
+      fallback_models: ["gpt-5-mini", "gpt-4.1"],
+      max_tokens: 12288,
+      budget_limit_usd: 5,
+      reasoning_effort: "medium",
     },
     {
       key: "ops_agent",
@@ -96,6 +127,12 @@ const ROLE_TEMPLATES: Record<"en" | "zh", RoleTemplate[]> = {
       tool_guidelines:
         "Use execute_shell_command for diagnostics and scripts. Avoid destructive commands unless explicitly approved.",
       routing_keywords: ["deploy", "runtime", "ops", "monitor", "incident"],
+      model_provider: "openai",
+      model_name: "gpt-5-mini",
+      fallback_models: ["gpt-4.1-mini"],
+      max_tokens: 4096,
+      budget_limit_usd: 1,
+      reasoning_effort: "low",
     },
   ],
   zh: [
@@ -108,6 +145,12 @@ const ROLE_TEMPLATES: Record<"en" | "zh", RoleTemplate[]> = {
       tool_guidelines:
         "优先使用 web_search/web_fetch 与只读工具；非必要不写文件，不做与目标无关的操作。",
       routing_keywords: ["资讯", "调研", "采集", "分析", "总结"],
+      model_provider: "openai",
+      model_name: "gpt-5-chat",
+      fallback_models: ["gpt-5-mini"],
+      max_tokens: 8192,
+      budget_limit_usd: 2,
+      reasoning_effort: "high",
     },
     {
       key: "coding_agent",
@@ -118,6 +161,12 @@ const ROLE_TEMPLATES: Record<"en" | "zh", RoleTemplate[]> = {
       tool_guidelines:
         "主要使用 read_file/edit_file/write_file 与 execute_shell_command；先验证再宣称完成。",
       routing_keywords: ["开发", "编码", "修复", "重构", "测试"],
+      model_provider: "openai",
+      model_name: "gpt-5-chat",
+      fallback_models: ["gpt-5-mini", "gpt-4.1"],
+      max_tokens: 12288,
+      budget_limit_usd: 5,
+      reasoning_effort: "medium",
     },
     {
       key: "ops_agent",
@@ -128,6 +177,12 @@ const ROLE_TEMPLATES: Record<"en" | "zh", RoleTemplate[]> = {
       tool_guidelines:
         "优先做诊断与可逆操作；涉及破坏性命令必须获得明确授权后再执行。",
       routing_keywords: ["运维", "部署", "监控", "故障", "告警"],
+      model_provider: "openai",
+      model_name: "gpt-5-mini",
+      fallback_models: ["gpt-4.1-mini"],
+      max_tokens: 4096,
+      budget_limit_usd: 1,
+      reasoning_effort: "low",
     },
   ],
 };
@@ -142,9 +197,84 @@ function buildUniqueRoleKey(base: string, existing: Set<string>): string {
   return candidate;
 }
 
+function resolveTemplateModelDefaults(
+  template: RoleTemplate,
+  modelProviders: SubagentModelProviderOption[],
+  activeProviderId: string,
+  activeModel: string,
+): Pick<
+  SubagentRoleConfig,
+  | "model_provider"
+  | "model_name"
+  | "fallback_models"
+  | "max_tokens"
+  | "budget_limit_usd"
+  | "reasoning_effort"
+> {
+  const providerMap = new Map(modelProviders.map((provider) => [provider.id, provider]));
+
+  const preferredProvider = template.model_provider.trim();
+  let selectedProvider = "";
+  if (preferredProvider && providerMap.has(preferredProvider)) {
+    selectedProvider = preferredProvider;
+  } else if (activeProviderId && providerMap.has(activeProviderId)) {
+    selectedProvider = activeProviderId;
+  } else if (modelProviders.length > 0) {
+    selectedProvider = modelProviders[0].id;
+  }
+
+  const selectedProviderModels =
+    selectedProvider && providerMap.has(selectedProvider)
+      ? providerMap.get(selectedProvider)?.models || []
+      : [];
+
+  const preferredModel = template.model_name.trim();
+  const activeModelAllowed =
+    selectedProvider === activeProviderId && !!activeModel.trim()
+      ? activeModel.trim()
+      : "";
+  const selectedModelCandidates = [
+    preferredModel,
+    activeModelAllowed,
+    selectedProviderModels[0]?.id || "",
+  ];
+  const selectedModel =
+    selectedModelCandidates.find(
+      (candidate) =>
+        candidate &&
+        selectedProviderModels.some((model) => model.id === candidate),
+    ) || "";
+
+  let fallbackModels = template.fallback_models.filter(
+    (modelId) =>
+      !!modelId &&
+      modelId !== selectedModel &&
+      selectedProviderModels.some((model) => model.id === modelId),
+  );
+
+  if (fallbackModels.length === 0 && selectedProviderModels.length > 1) {
+    fallbackModels = selectedProviderModels
+      .map((model) => model.id)
+      .filter((modelId) => modelId && modelId !== selectedModel)
+      .slice(0, 2);
+  }
+
+  return {
+    model_provider: selectedProvider,
+    model_name: selectedModel,
+    fallback_models: fallbackModels,
+    max_tokens: template.max_tokens ?? null,
+    budget_limit_usd: template.budget_limit_usd ?? null,
+    reasoning_effort: template.reasoning_effort,
+  };
+}
+
 function makeRoleDefaults(
   lang: string,
   existingRoles: Array<Partial<SubagentRoleConfig>>,
+  modelProviders: SubagentModelProviderOption[],
+  activeProviderId: string,
+  activeModel: string,
 ): SubagentRoleConfig {
   const locale = lang.toLowerCase().startsWith("zh") ? "zh" : "en";
   const templates = ROLE_TEMPLATES[locale];
@@ -157,6 +287,12 @@ function makeRoleDefaults(
   const roleKey = buildUniqueRoleKey(template.key, existingKeys);
   const roleName =
     roleKey === template.key ? template.name : `${template.name} ${existingRoles.length + 1}`;
+  const modelDefaults = resolveTemplateModelDefaults(
+    template,
+    modelProviders,
+    activeProviderId,
+    activeModel,
+  );
 
   return {
     key: roleKey,
@@ -167,6 +303,12 @@ function makeRoleDefaults(
     enabled: true,
     routing_keywords: [...template.routing_keywords],
     tool_allowlist: [],
+    model_provider: modelDefaults.model_provider,
+    model_name: modelDefaults.model_name,
+    fallback_models: modelDefaults.fallback_models,
+    max_tokens: modelDefaults.max_tokens,
+    budget_limit_usd: modelDefaults.budget_limit_usd,
+    reasoning_effort: modelDefaults.reasoning_effort,
     mcp_policy: "inherit",
     mcp_selected: [],
     skills_policy: "inherit",
@@ -187,6 +329,9 @@ function SubagentsPage() {
 
   const [mcpOptions, setMcpOptions] = useState<string[]>([]);
   const [skillOptions, setSkillOptions] = useState<string[]>([]);
+  const [modelProviderOptions, setModelProviderOptions] = useState<SubagentModelProviderOption[]>([]);
+  const [activeModelProviderId, setActiveModelProviderId] = useState("");
+  const [activeModelName, setActiveModelName] = useState("");
 
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
@@ -212,11 +357,13 @@ function SubagentsPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTask, setDetailTask] = useState<SubagentTask | null>(null);
+  const [detailEvents, setDetailEvents] = useState<SubagentTaskEvent[]>([]);
 
   const fetchReferenceOptions = useCallback(async () => {
-    const [mcpResult, skillsResult] = await Promise.allSettled([
+    const [mcpResult, skillsResult, modelOptionsResult] = await Promise.allSettled([
       api.listMCPClients(),
       api.listSkills(),
+      api.getSubagentRoleModelOptions(),
     ]);
 
     if (mcpResult.status === "fulfilled") {
@@ -226,6 +373,11 @@ function SubagentsPage() {
     if (skillsResult.status === "fulfilled") {
       const skillValues = skillsResult.value.map((item: SkillSpec) => item.name);
       setSkillOptions(skillValues);
+    }
+    if (modelOptionsResult.status === "fulfilled") {
+      setModelProviderOptions(modelOptionsResult.value.providers || []);
+      setActiveModelProviderId(modelOptionsResult.value.active_provider_id || "");
+      setActiveModelName(modelOptionsResult.value.active_model || "");
     }
   }, []);
 
@@ -316,9 +468,14 @@ function SubagentsPage() {
     async (taskId: string) => {
       setDetailOpen(true);
       setDetailLoading(true);
+      setDetailEvents([]);
       try {
-        const detail = await api.getSubagentTask(taskId);
+        const [detail, events] = await Promise.all([
+          api.getSubagentTask(taskId),
+          api.getSubagentTaskEvents(taskId),
+        ]);
         setDetailTask(detail);
+        setDetailEvents(events.items || []);
       } catch (error) {
         message.error(
           error instanceof Error ? error.message : t("subagents.detailLoadFailed"),
@@ -357,6 +514,27 @@ function SubagentsPage() {
         render: (value: string) => value || "-",
       },
       {
+        title: t("subagents.selectedModel"),
+        key: "selected_model",
+        width: 220,
+        render: (_, record) =>
+          record.selected_model_name
+            ? `${record.selected_model_provider || "-"} / ${record.selected_model_name}`
+            : "-",
+      },
+      {
+        title: t("subagents.fallbackUsed"),
+        dataIndex: "model_fallback_used",
+        width: 120,
+        render: (value: boolean) => (value ? t("subagents.yes") : t("subagents.no")),
+      },
+      {
+        title: t("subagents.costEstimate"),
+        dataIndex: "cost_estimate_usd",
+        width: 120,
+        render: (value: number | null | undefined) => formatCost(value),
+      },
+      {
         title: t("subagents.duration"),
         dataIndex: "duration_ms",
         width: 100,
@@ -387,9 +565,43 @@ function SubagentsPage() {
     [roleValues],
   );
 
+  const providerOptions = useMemo(
+    () =>
+      modelProviderOptions.map((provider) => ({
+        value: provider.id,
+        label: provider.name,
+      })),
+    [modelProviderOptions],
+  );
+
+  const modelsByProvider = useMemo(() => {
+    const mapping: Record<string, { value: string; label: string }[]> = {};
+    for (const provider of modelProviderOptions) {
+      mapping[provider.id] = provider.models.map((model) => ({
+        value: model.id,
+        label: model.name || model.id,
+      }));
+    }
+    return mapping;
+  }, [modelProviderOptions]);
+
   const defaultRoleDraft = useMemo(
-    () => makeRoleDefaults(i18n.resolvedLanguage || i18n.language || "en", roleValues),
-    [i18n.language, i18n.resolvedLanguage, roleValues],
+    () =>
+      makeRoleDefaults(
+        i18n.resolvedLanguage || i18n.language || "en",
+        roleValues,
+        modelProviderOptions,
+        activeModelProviderId,
+        activeModelName,
+      ),
+    [
+      activeModelName,
+      activeModelProviderId,
+      i18n.language,
+      i18n.resolvedLanguage,
+      modelProviderOptions,
+      roleValues,
+    ],
   );
 
   const tabItems: TabsProps["items"] = [
@@ -524,74 +736,115 @@ function SubagentsPage() {
                       {t("subagents.addRole")}
                     </Button>
                   </div>
-                  {fields.map((field, idx) => (
-                    <Card
-                      key={field.key}
-                      size="small"
-                      style={{ marginBottom: 12 }}
-                      title={`${t("subagents.roleCardTitle")} #${idx + 1}`}
-                      extra={
-                        <Button danger type="link" onClick={() => remove(field.name)}>
-                          {t("common.delete")}
-                        </Button>
-                      }
-                    >
-                      <div className={styles.grid2}>
-                        <Form.Item label={t("subagents.roleKey")} name={[field.name, "key"]}>
-                          <Input placeholder="research_agent" />
+                  {fields.map((field, idx) => {
+                    const roleProviderId = ((roleValues[idx]?.model_provider as string) || "").trim();
+                    const roleModelOptions = roleProviderId ? (modelsByProvider[roleProviderId] || []) : [];
+                    return (
+                      <Card
+                        key={field.key}
+                        size="small"
+                        style={{ marginBottom: 12 }}
+                        title={`${t("subagents.roleCardTitle")} #${idx + 1}`}
+                        extra={
+                          <Button danger type="link" onClick={() => remove(field.name)}>
+                            {t("common.delete")}
+                          </Button>
+                        }
+                      >
+                        <div className={styles.grid2}>
+                          <Form.Item label={t("subagents.roleKey")} name={[field.name, "key"]}>
+                            <Input placeholder="research_agent" />
+                          </Form.Item>
+                          <Form.Item label={t("subagents.roleName")} name={[field.name, "name"]}>
+                            <Input placeholder={t("subagents.roleNamePlaceholder")} />
+                          </Form.Item>
+                        </div>
+                        <Form.Item label={t("subagents.roleEnabled")} name={[field.name, "enabled"]} valuePropName="checked">
+                          <Switch />
                         </Form.Item>
-                        <Form.Item label={t("subagents.roleName")} name={[field.name, "name"]}>
-                          <Input placeholder={t("subagents.roleNamePlaceholder")} />
+                        <Form.Item label={t("subagents.roleDescription")} name={[field.name, "description"]}>
+                          <Input.TextArea rows={2} />
                         </Form.Item>
-                      </div>
-                      <Form.Item label={t("subagents.roleEnabled")} name={[field.name, "enabled"]} valuePropName="checked">
-                        <Switch />
-                      </Form.Item>
-                      <Form.Item label={t("subagents.roleDescription")} name={[field.name, "description"]}>
-                        <Input.TextArea rows={2} />
-                      </Form.Item>
-                      <Form.Item label={t("subagents.roleIdentityPrompt")} name={[field.name, "identity_prompt"]}>
-                        <Input.TextArea rows={3} />
-                      </Form.Item>
-                      <Form.Item label={t("subagents.roleToolGuidelines")} name={[field.name, "tool_guidelines"]}>
-                        <Input.TextArea rows={3} />
-                      </Form.Item>
-                      <Form.Item label={t("subagents.roleRoutingKeywords")} name={[field.name, "routing_keywords"]}>
-                        <Select mode="tags" tokenSeparators={[","]} />
-                      </Form.Item>
-                      <Form.Item label={t("subagents.roleToolAllowlist")} name={[field.name, "tool_allowlist"]}>
-                        <Select mode="tags" tokenSeparators={[","]} />
-                      </Form.Item>
-                      <div className={styles.grid2}>
-                        <Form.Item label={t("subagents.roleMcpPolicy")} name={[field.name, "mcp_policy"]}>
-                          <Select
-                            options={[
-                              { value: "inherit", label: t("subagents.policy.inherit") },
-                              { value: "none", label: t("subagents.policy.none") },
-                              { value: "selected", label: t("subagents.policy.selected") },
-                              { value: "all", label: t("subagents.policy.all") },
-                            ]}
-                          />
+                        <Form.Item label={t("subagents.roleIdentityPrompt")} name={[field.name, "identity_prompt"]}>
+                          <Input.TextArea rows={3} />
                         </Form.Item>
-                        <Form.Item label={t("subagents.roleSkillsPolicy")} name={[field.name, "skills_policy"]}>
-                          <Select
-                            options={[
-                              { value: "inherit", label: t("subagents.policy.inherit") },
-                              { value: "none", label: t("subagents.policy.none") },
-                              { value: "selected", label: t("subagents.policy.selected") },
-                              { value: "all", label: t("subagents.policy.all") },
-                            ]}
-                          />
+                        <Form.Item label={t("subagents.roleToolGuidelines")} name={[field.name, "tool_guidelines"]}>
+                          <Input.TextArea rows={3} />
                         </Form.Item>
-                      </div>
-                      <Form.Item label={t("subagents.mcpSelected")} name={[field.name, "mcp_selected"]}>
-                        <Select mode="tags" options={mcpOptions.map((v) => ({ value: v, label: v }))} />
-                      </Form.Item>
-                      <Form.Item label={t("subagents.skillsSelected")} name={[field.name, "skills_selected"]}>
-                        <Select mode="tags" options={skillOptions.map((v) => ({ value: v, label: v }))} />
-                      </Form.Item>
-                    </Card>
-                  ))}
+                        <Form.Item label={t("subagents.roleRoutingKeywords")} name={[field.name, "routing_keywords"]}>
+                          <Select mode="tags" tokenSeparators={[","]} />
+                        </Form.Item>
+                        <Form.Item label={t("subagents.roleToolAllowlist")} name={[field.name, "tool_allowlist"]}>
+                          <Select mode="tags" tokenSeparators={[","]} />
+                        </Form.Item>
+
+                        <Alert
+                          style={{ marginBottom: 12 }}
+                          type="info"
+                          showIcon
+                          message={t("subagents.roleModelPolicyHint")}
+                        />
+                        <div className={styles.grid2}>
+                          <Form.Item label={t("subagents.roleModelProvider")} name={[field.name, "model_provider"]}>
+                            <Select allowClear options={providerOptions} />
+                          </Form.Item>
+                          <Form.Item label={t("subagents.roleModelName")} name={[field.name, "model_name"]}>
+                            <Select allowClear showSearch options={roleModelOptions} />
+                          </Form.Item>
+                        </div>
+                        <Form.Item label={t("subagents.roleFallbackModels")} name={[field.name, "fallback_models"]}>
+                          <Select mode="multiple" showSearch options={roleModelOptions} />
+                        </Form.Item>
+                        <div className={styles.grid3}>
+                          <Form.Item label={t("subagents.roleMaxTokens")} name={[field.name, "max_tokens"]}>
+                            <InputNumber min={1} style={{ width: "100%" }} />
+                          </Form.Item>
+                          <Form.Item label={t("subagents.roleBudgetLimitUsd")} name={[field.name, "budget_limit_usd"]}>
+                            <InputNumber min={0} step={0.01} style={{ width: "100%" }} />
+                          </Form.Item>
+                          <Form.Item label={t("subagents.roleReasoningEffort")} name={[field.name, "reasoning_effort"]}>
+                            <Select
+                              allowClear
+                              options={[
+                                { value: "low", label: t("subagents.reasoning.low") },
+                                { value: "medium", label: t("subagents.reasoning.medium") },
+                                { value: "high", label: t("subagents.reasoning.high") },
+                              ]}
+                            />
+                          </Form.Item>
+                        </div>
+
+                        <div className={styles.grid2}>
+                          <Form.Item label={t("subagents.roleMcpPolicy")} name={[field.name, "mcp_policy"]}>
+                            <Select
+                              options={[
+                                { value: "inherit", label: t("subagents.policy.inherit") },
+                                { value: "none", label: t("subagents.policy.none") },
+                                { value: "selected", label: t("subagents.policy.selected") },
+                                { value: "all", label: t("subagents.policy.all") },
+                              ]}
+                            />
+                          </Form.Item>
+                          <Form.Item label={t("subagents.roleSkillsPolicy")} name={[field.name, "skills_policy"]}>
+                            <Select
+                              options={[
+                                { value: "inherit", label: t("subagents.policy.inherit") },
+                                { value: "none", label: t("subagents.policy.none") },
+                                { value: "selected", label: t("subagents.policy.selected") },
+                                { value: "all", label: t("subagents.policy.all") },
+                              ]}
+                            />
+                          </Form.Item>
+                        </div>
+                        <Form.Item label={t("subagents.mcpSelected")} name={[field.name, "mcp_selected"]}>
+                          <Select mode="tags" options={mcpOptions.map((v) => ({ value: v, label: v }))} />
+                        </Form.Item>
+                        <Form.Item label={t("subagents.skillsSelected")} name={[field.name, "skills_selected"]}>
+                          <Select mode="tags" options={skillOptions.map((v) => ({ value: v, label: v }))} />
+                        </Form.Item>
+                      </Card>
+                    );
+                  })}
                 </>
               )}
             </Form.List>
@@ -724,6 +977,20 @@ function SubagentsPage() {
               {detailTask.dispatch_reason || "-"}
             </div>
             <div>
+              <strong>{t("subagents.selectedModel")}:</strong>{" "}
+              {detailTask.selected_model_name
+                ? `${detailTask.selected_model_provider || "-"} / ${detailTask.selected_model_name}`
+                : "-"}
+            </div>
+            <div>
+              <strong>{t("subagents.fallbackUsed")}:</strong>{" "}
+              {detailTask.model_fallback_used ? t("subagents.yes") : t("subagents.no")}
+            </div>
+            <div>
+              <strong>{t("subagents.costEstimate")}:</strong>{" "}
+              {formatCost(detailTask.cost_estimate_usd)}
+            </div>
+            <div>
               <strong>{t("subagents.startedAt")}:</strong>{" "}
               {formatDateTime(detailTask.started_at)}
             </div>
@@ -752,6 +1019,31 @@ function SubagentsPage() {
               <pre className={styles.pre}>
                 {JSON.stringify(detailTask.artifacts, null, 2)}
               </pre>
+            </div>
+            <div>
+              <strong>{t("subagents.taskEvents")}:</strong>
+              {detailEvents.length === 0 ? (
+                <div className={styles.eventsEmpty}>{t("subagents.noEvents")}</div>
+              ) : (
+                <Timeline
+                  className={styles.eventsTimeline}
+                  items={detailEvents.map((event) => ({
+                    children: (
+                      <div className={styles.eventItem}>
+                        <div className={styles.eventMeta}>
+                          <span>{formatDateTime(event.ts)}</span>
+                          <span>{event.type}</span>
+                          {event.status && <span>{t(`subagents.status.${event.status}`)}</span>}
+                        </div>
+                        <div>{event.summary || "-"}</div>
+                        {!!event.payload && Object.keys(event.payload).length > 0 && (
+                          <pre className={styles.pre}>{JSON.stringify(event.payload, null, 2)}</pre>
+                        )}
+                      </div>
+                    ),
+                  }))}
+                />
+              )}
             </div>
           </div>
         ) : (

@@ -14,6 +14,13 @@ export type SubagentTaskStatus =
   | "error"
   | "timeout"
   | "cancelled";
+export type SubagentTaskEventType =
+  | "dispatch"
+  | "model_selected"
+  | "tool_call"
+  | "tool_result"
+  | "status_change"
+  | "error";
 
 export interface SubagentToolsConfig {
   default_enabled: string[];
@@ -29,6 +36,12 @@ export interface SubagentRoleConfig {
   routing_keywords: string[];
   tool_allowlist: string[];
   timeout_seconds?: number | null;
+  model_provider: string;
+  model_name: string;
+  fallback_models: string[];
+  max_tokens?: number | null;
+  budget_limit_usd?: number | null;
+  reasoning_effort: string;
   mcp_policy: SubagentRolePolicy;
   mcp_selected: string[];
   skills_policy: SubagentRolePolicy;
@@ -71,6 +84,11 @@ export interface SubagentTask {
   task_prompt: string;
   write_mode: string;
   allowed_paths: string[];
+  selected_model_provider: string;
+  selected_model_name: string;
+  reasoning_effort: string;
+  model_fallback_used: boolean;
+  cost_estimate_usd?: number | null;
   started_at?: string | null;
   ended_at?: string | null;
   duration_ms?: number | null;
@@ -84,4 +102,38 @@ export interface SubagentTaskListResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface SubagentTaskEvent {
+  event_id: string;
+  task_id: string;
+  ts: string;
+  type: SubagentTaskEventType;
+  summary: string;
+  status?: SubagentTaskStatus | null;
+  payload: Record<string, unknown>;
+}
+
+export interface SubagentTaskEventListResponse {
+  task_id: string;
+  items: SubagentTaskEvent[];
+}
+
+export interface SubagentModelOption {
+  id: string;
+  name: string;
+}
+
+export interface SubagentModelProviderOption {
+  id: string;
+  name: string;
+  is_local: boolean;
+  has_api_key: boolean;
+  models: SubagentModelOption[];
+}
+
+export interface SubagentRoleModelOptionsResponse {
+  active_provider_id: string;
+  active_model: string;
+  providers: SubagentModelProviderOption[];
 }

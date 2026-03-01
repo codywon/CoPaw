@@ -6,7 +6,7 @@ with integrated tools, skills, and memory management.
 """
 import logging
 import os
-from typing import Any, List, Optional, Type
+from typing import TYPE_CHECKING, Any, List, Optional, Type
 
 from agentscope.agent import ReActAgent
 from agentscope.message import Msg
@@ -48,6 +48,10 @@ from ..constant import (
     MEMORY_COMPACT_RATIO,
     WORKING_DIR,
 )
+from ..providers import load_providers_json, resolve_llm_config
+
+if TYPE_CHECKING:
+    from ..providers import ResolvedModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +84,7 @@ class CoPawAgent(ReActAgent):
         enable_skills: bool = True,
         allowed_skills: Optional[set[str]] = None,
         subagents_config: Optional[SubagentsConfig] = None,
+        llm_cfg: Optional["ResolvedModelConfig"] = None,
     ):
         """Initialize CoPawAgent.
 
@@ -127,7 +132,7 @@ class CoPawAgent(ReActAgent):
         sys_prompt = self._build_sys_prompt()
 
         # Create model and formatter using factory method
-        model, formatter = create_model_and_formatter()
+        model, formatter = create_model_and_formatter(llm_cfg=llm_cfg)
 
         # Initialize parent ReActAgent
         super().__init__(
@@ -402,6 +407,7 @@ class CoPawAgent(ReActAgent):
     def _create_subagent_worker(
         self,
         role_config: Optional[SubagentRoleConfig] = None,
+        llm_cfg: Optional["ResolvedModelConfig"] = None,
     ) -> "CoPawAgent":
         enable_skills, allowed_skills = self._resolve_subagent_skills_policy(
             role_config=role_config,
@@ -449,7 +455,79 @@ class CoPawAgent(ReActAgent):
             enable_skills=enable_skills,
             allowed_skills=allowed_skills,
             subagents_config=self._subagents_config,
+            llm_cfg=llm_cfg,
         )
+
+    def _resolve_subagent_model_plan(
+        self,
+        role_config: Optional[SubagentRoleConfig] = None,
+    ) -> dict[str, Any]:
+        """Resolve model selection for a subagent from role policy first."""
+        providers_data = load_providers_json()
+        active_provider = providers_data.active_llm.provider_id
+        active_model = providers_data.active_llm.model
+
+        selected_provider = active_provider
+        selected_model = active_model
+        fallback_used = False
+        llm_cfg = None
+
+        if role_config is not None:
+            role_provider = role_config.model_provider.strip()
+            role_model = role_config.model_name.strip()
+            if role_provider and role_model:
+                seen: set[str] = set()
+                candidates: list[str] = []
+                for item in [role_model, *role_config.fallback_models]:
+                    model_name = item.strip()
+                    if not model_name:
+                        continue
+                    key = model_name.lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    candidates.append(model_name)
+
+                for idx, model_name in enumerate(candidates):
+                    resolved = resolve_llm_config(
+                        role_provider,
+                        model_name,
+                        providers_data,
+                    )
+                    if resolved is None:
+                        continue
+                    selected_provider = role_provider
+                    selected_model = model_name
+                    fallback_used = idx > 0
+                    llm_cfg = resolved
+                    break
+                if llm_cfg is None:
+                    logger.warning(
+                        "Role model policy unresolved for role=%s provider=%s model=%s; falling back to active model",
+                        role_config.key,
+                        role_provider,
+                        role_model,
+                    )
+
+        if llm_cfg is None and selected_provider and selected_model:
+            llm_cfg = resolve_llm_config(
+                selected_provider,
+                selected_model,
+                providers_data,
+            )
+
+        return {
+            "provider": selected_provider,
+            "model": selected_model,
+            "fallback_used": fallback_used,
+            "reasoning_effort": (
+                role_config.reasoning_effort.strip()
+                if role_config is not None
+                else ""
+            ),
+            "cost_estimate_usd": None,
+            "llm_cfg": llm_cfg,
+        }
 
     async def _spawn_worker_impl(
         self,
@@ -498,9 +576,13 @@ class CoPawAgent(ReActAgent):
             resolved_reason = "manual_tool_call"
 
         manager = self._get_or_create_subagent_manager()
+        model_plan = self._resolve_subagent_model_plan(role_config=role_config)
 
         async def _runner() -> str:
-            worker = self._create_subagent_worker(role_config=role_config)
+            worker = self._create_subagent_worker(
+                role_config=role_config,
+                llm_cfg=model_plan.get("llm_cfg"),
+            )
             await worker.register_mcp_clients()
             worker.set_console_output_enabled(enabled=False)
             reply = await worker.reply(
@@ -527,6 +609,11 @@ class CoPawAgent(ReActAgent):
             allowed_paths=self._subagents_config.allowed_paths,
             retry_max_attempts=self._subagents_config.retry_max_attempts,
             retry_backoff_seconds=self._subagents_config.retry_backoff_seconds,
+            selected_model_provider=model_plan.get("provider", ""),
+            selected_model_name=model_plan.get("model", ""),
+            reasoning_effort=model_plan.get("reasoning_effort", ""),
+            model_fallback_used=bool(model_plan.get("fallback_used", False)),
+            cost_estimate_usd=model_plan.get("cost_estimate_usd"),
         )
 
         if self._subagents_config.execution_mode == "async":

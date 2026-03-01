@@ -22,9 +22,14 @@ async def test_manager_runs_task_successfully():
         task_prompt="test task",
         runner=_runner,
         parent_session_id="s1",
+        selected_model_provider="openai",
+        selected_model_name="gpt-5-chat",
     )
     assert task.status == "success"
     assert task.result_summary == "done"
+    assert task.selected_model_provider == "openai"
+    assert task.selected_model_name == "gpt-5-chat"
+    assert task.model_fallback_used is False
 
 
 @pytest.mark.asyncio
@@ -160,3 +165,28 @@ async def test_manager_cancel_task_tree_cascades_to_children():
     c = store.get_task(child)
     assert p is not None and p.status == "cancelled"
     assert c is not None and c.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_manager_records_status_change_events():
+    store = get_subagent_task_store()
+    manager = SubagentManager(
+        max_concurrency=1,
+        default_timeout_seconds=30,
+        hard_timeout_seconds=60,
+        store=store,
+    )
+
+    async def _runner():
+        return "ok"
+
+    task = await manager.run_task(
+        task_prompt="event task",
+        runner=_runner,
+    )
+
+    events = store.list_task_events(task.task_id)
+    statuses = [event.status for event in events if event.type == "status_change"]
+    assert "queued" in statuses
+    assert "running" in statuses
+    assert "success" in statuses
