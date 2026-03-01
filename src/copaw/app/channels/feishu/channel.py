@@ -914,6 +914,28 @@ class FeishuChannel(BaseChannel):
             },
         }
 
+    def _build_interactive_card_content(self, text: str) -> Dict[str, Any]:
+        """Build a minimal interactive card payload for text responses."""
+        normalized = normalize_feishu_md(text or "").strip() or "[empty]"
+        return {
+            "config": {
+                "wide_screen_mode": True,
+            },
+            "header": {
+                "template": "blue",
+                "title": {
+                    "tag": "plain_text",
+                    "content": self.bot_prefix.strip() or "CoPaw",
+                },
+            },
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "content": normalized,
+                },
+            ],
+        }
+
     def _upload_image_sync(self, data: bytes, filename: str) -> Optional[str]:
         """Upload image via lark client; return image_key."""
         if not FEISHU_AVAILABLE or not self._client:
@@ -972,21 +994,9 @@ class FeishuChannel(BaseChannel):
         if size > FEISHU_FILE_MAX_BYTES:
             logger.warning("feishu file too large size=%s", size)
             return None
-        ext = path.suffix.lower().lstrip(".")
+        # Keep upload type aligned with msg_type=file to avoid Feishu
+        # mismatch errors (e.g. code 230055) for video/doc uploads.
         file_type = "stream"
-        if ext in (
-            "pdf",
-            "doc",
-            "docx",
-            "xls",
-            "xlsx",
-            "ppt",
-            "pptx",
-            "mp4",
-        ):
-            file_type = "doc" if ext == "docx" else ext
-            file_type = "xls" if ext == "xlsx" else file_type
-            file_type = "ppt" if ext == "pptx" else file_type
         mime = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
         url = "https://open.feishu.cn/open-apis/im/v1/files"
         form = aiohttp.FormData()
@@ -1100,17 +1110,33 @@ class FeishuChannel(BaseChannel):
         receive_id: str,
         body: str,
     ) -> bool:
-        """Send text as post (md). Body already has bot_prefix if needed."""
-        post = self._build_post_content(body, [])
-        content = json.dumps(post, ensure_ascii=False)
+        """Send text as interactive card first, then fallback to post."""
         loop = asyncio.get_running_loop()
+        card = self._build_interactive_card_content(body)
+        card_content = json.dumps(card, ensure_ascii=False)
+        sent = await loop.run_in_executor(
+            None,
+            lambda: self._send_message_sync(
+                receive_id_type,
+                receive_id,
+                "interactive",
+                card_content,
+            ),
+        )
+        if sent:
+            logger.info("feishu _send_text: interactive card sent")
+            return True
+
+        logger.warning("feishu _send_text: interactive card failed; fallback to post")
+        post = self._build_post_content(body, [])
+        post_content = json.dumps(post, ensure_ascii=False)
         return await loop.run_in_executor(
             None,
             lambda: self._send_message_sync(
                 receive_id_type,
                 receive_id,
                 "post",
-                content,
+                post_content,
             ),
         )
 
@@ -1210,6 +1236,8 @@ class FeishuChannel(BaseChannel):
         """Resolve part to local path or URL for file upload."""
         url = (
             getattr(part, "file_url", None)
+            or getattr(part, "video_url", None)
+            or getattr(part, "audio_url", None)
             or getattr(part, "image_url", None)
             or getattr(part, "data", None)
             or ""
@@ -1427,6 +1455,7 @@ class FeishuChannel(BaseChannel):
             body = prefix + body
         if body:
             await self._send_text(receive_id_type, receive_id, body)
+        failed_media_types: List[str] = []
         for part in media_parts:
             pt = getattr(part, "type", None)
             if pt == ContentType.IMAGE:
@@ -1439,6 +1468,8 @@ class FeishuChannel(BaseChannel):
                     "feishu send_content_parts: image sent ok=%s",
                     ok,
                 )
+                if not ok:
+                    failed_media_types.append(str(pt or "image"))
             elif pt in (
                 ContentType.FILE,
                 ContentType.VIDEO,
@@ -1454,6 +1485,20 @@ class FeishuChannel(BaseChannel):
                     ok,
                     pt,
                 )
+                if not ok:
+                    failed_media_types.append(str(pt or "file"))
+        if failed_media_types:
+            failed_types = ", ".join(sorted(set(failed_media_types)))
+            await self._send_text(
+                receive_id_type,
+                receive_id,
+                (
+                    "Attachment delivery failed "
+                    f"(types: {failed_types}). "
+                    "Check file size (<=30MB), format, and Feishu app "
+                    "permissions."
+                ),
+            )
 
     async def send(
         self,
