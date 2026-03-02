@@ -13,6 +13,7 @@ export interface CronJobDispatch {
   type: "channel";
   channel?: string;
   target: CronJobTarget;
+  target_policy?: "strict" | "fallback_last";
   mode?: "stream" | "final";
   meta?: Record<string, unknown>;
 }

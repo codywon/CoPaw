@@ -5,7 +5,9 @@ import asyncio
 import logging
 from typing import Any, Dict
 
+from ...config import load_config
 from .models import CronJobSpec
+from .targeting import enrich_dispatch_meta, resolve_target_for_execute
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +24,36 @@ class CronExecutor:
         - task_type agent: ask agent with prompt, send reply to channel (
             stream_query + send_event)
         """
-        target_user_id = job.dispatch.target.user_id
-        target_session_id = job.dispatch.target.session_id
-        dispatch_meta: Dict[str, Any] = dict(job.dispatch.meta or {})
+        target_user_id = (job.dispatch.target.user_id or "").strip()
+        target_session_id = (job.dispatch.target.session_id or "").strip()
+        dispatch_meta: Dict[str, Any] = enrich_dispatch_meta(
+            channel=job.dispatch.channel,
+            user_id=target_user_id,
+            meta=job.dispatch.meta,
+        )
+        last_dispatch = None
+        if job.dispatch.target_policy == "fallback_last":
+            config = load_config()
+            last_dispatch = config.last_dispatch
+        target_user_id, target_session_id = resolve_target_for_execute(
+            channel=job.dispatch.channel,
+            user_id=target_user_id,
+            session_id=target_session_id,
+            target_policy=job.dispatch.target_policy,
+            last_dispatch=last_dispatch,
+        )
+        dispatch_meta = enrich_dispatch_meta(
+            channel=job.dispatch.channel,
+            user_id=target_user_id,
+            meta=dispatch_meta,
+        )
         logger.info(
-            "cron execute: job_id=%s channel=%s task_type=%s "
+            "cron execute: job_id=%s channel=%s task_type=%s target_policy=%s "
             "target_user_id=%s target_session_id=%s",
             job.id,
             job.dispatch.channel,
             job.task_type,
+            job.dispatch.target_policy,
             target_user_id[:40] if target_user_id else "",
             target_session_id[:40] if target_session_id else "",
         )

@@ -4,8 +4,10 @@ from __future__ import annotations
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ...config import load_config
 from .manager import CronManager
 from .models import CronJobSpec, CronJobView
+from .targeting import enrich_dispatch_meta, resolve_target_for_persist
 
 router = APIRouter(prefix="/cron", tags=["cron"])
 
@@ -18,6 +20,32 @@ def get_cron_manager(request: Request) -> CronManager:
             detail="cron manager not initialized",
         )
     return mgr
+
+
+def _normalize_spec_for_save(spec: CronJobSpec) -> CronJobSpec:
+    cfg = load_config()
+    dispatch = spec.dispatch
+    target = dispatch.target
+    try:
+        resolved_user_id, resolved_session_id = resolve_target_for_persist(
+            channel=dispatch.channel,
+            user_id=target.user_id,
+            session_id=target.session_id,
+            target_policy=dispatch.target_policy,
+            last_dispatch=cfg.last_dispatch,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    payload = spec.model_dump(mode="json")
+    payload["dispatch"]["target"]["user_id"] = resolved_user_id
+    payload["dispatch"]["target"]["session_id"] = resolved_session_id
+    payload["dispatch"]["meta"] = enrich_dispatch_meta(
+        channel=dispatch.channel,
+        user_id=resolved_user_id,
+        meta=payload["dispatch"].get("meta"),
+    )
+    return CronJobSpec.model_validate(payload)
 
 
 @router.get("/jobs", response_model=list[CronJobSpec])
@@ -40,7 +68,10 @@ async def create_job(
 ):
     # server generates id; ignore client-provided spec.id
     job_id = str(uuid.uuid4())
-    created = spec.model_copy(update={"id": job_id})
+    normalized = _normalize_spec_for_save(spec)
+    payload = normalized.model_dump(mode="json")
+    payload["id"] = job_id
+    created = CronJobSpec.model_validate(payload)
     await mgr.create_or_replace_job(created)
     return created
 
@@ -53,8 +84,9 @@ async def replace_job(
 ):
     if spec.id != job_id:
         raise HTTPException(status_code=400, detail="job_id mismatch")
-    await mgr.create_or_replace_job(spec)
-    return spec
+    normalized = _normalize_spec_for_save(spec)
+    await mgr.create_or_replace_job(normalized)
+    return normalized
 
 
 @router.delete("/jobs/{job_id}")

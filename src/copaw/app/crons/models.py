@@ -53,6 +53,9 @@ class DispatchSpec(BaseModel):
     type: Literal["channel"] = "channel"
     channel: str = Field(default=DEFAULT_CHANNEL)
     target: DispatchTarget
+    target_policy: Literal["strict", "fallback_last"] = Field(
+        default="strict",
+    )
     mode: Literal["stream", "final"] = Field(default="stream")
     meta: Dict[str, Any] = Field(default_factory=dict)
 

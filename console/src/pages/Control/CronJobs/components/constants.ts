@@ -31,8 +31,8 @@ export const DEFAULT_FORM_VALUES = {
     type: "channel" as const,
     channel: "console",
     target: {
-      user_id: "",
-      session_id: "",
+      user_id: "default",
+      session_id: "default",
     },
     mode: "final" as const,
   },
