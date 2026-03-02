@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 import os
 from typing import Optional, Union, Dict, List, Literal
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ConfigDict,
+    field_validator,
+    model_validator,
+)
 
 from ..constant import (
     HEARTBEAT_DEFAULT_EVERY,
@@ -185,7 +191,17 @@ def _normalize_auto_dispatch_keyword(raw: str) -> str:
     keyword = raw.strip()
     if not keyword:
         return ""
-    return AUTO_DISPATCH_MOJIBAKE_KEYWORDS.get(keyword, keyword)
+    normalized = AUTO_DISPATCH_MOJIBAKE_KEYWORDS.get(keyword, keyword)
+    if _is_question_placeholder(normalized):
+        return ""
+    return normalized
+
+
+def _is_question_placeholder(raw: str) -> bool:
+    compact = "".join(raw.strip().split())
+    if not compact:
+        return False
+    return all(ch in {"?", "？", "�"} for ch in compact)
 
 
 class SubagentRoleConfig(BaseModel):
@@ -210,6 +226,26 @@ class SubagentRoleConfig(BaseModel):
     mcp_selected: List[str] = Field(default_factory=list)
     skills_policy: SubagentRolePolicy = "inherit"
     skills_selected: List[str] = Field(default_factory=list)
+
+    @field_validator("routing_keywords", mode="before")
+    @classmethod
+    def normalize_routing_keywords(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            keyword = _normalize_auto_dispatch_keyword(item)
+            if not keyword:
+                continue
+            key = keyword.lower()
+            if key in seen:
+                continue
+            normalized.append(keyword)
+            seen.add(key)
+        return normalized
 
 
 class SubagentsConfig(BaseModel):
@@ -303,28 +339,73 @@ class MCPClientConfig(BaseModel):
     are ignored.
     """
 
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str
     description: str = ""
     enabled: bool = True
-    transport: str = Field(
-        default="stdio",
-        description=(
-            'Transport mode: "stdio", "sse", or "streamable_http"'
-        ),
-    )
-    # stdio fields
+    transport: Literal["stdio", "streamable_http", "sse"] = "stdio"
+    url: str = ""
+    headers: Dict[str, str] = Field(default_factory=dict)
     command: str = ""
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
-    # sse / streamable_http fields
-    url: str = Field(
-        default="",
-        description="Server URL for sse / streamable_http transport",
-    )
-    headers: Dict[str, str] = Field(
-        default_factory=dict,
-        description="HTTP headers for sse / streamable_http transport",
-    )
+    cwd: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_fields(cls, data):
+        """Normalize common MCP field aliases from third-party examples."""
+        if not isinstance(data, dict):
+            return data
+
+        payload = dict(data)
+
+        if "isActive" in payload and "enabled" not in payload:
+            payload["enabled"] = payload["isActive"]
+
+        if "baseUrl" in payload and "url" not in payload:
+            payload["url"] = payload["baseUrl"]
+
+        if "type" in payload and "transport" not in payload:
+            payload["transport"] = payload["type"]
+
+        if (
+            "transport" not in payload
+            and (payload.get("url") or payload.get("baseUrl"))
+            and not payload.get("command")
+        ):
+            payload["transport"] = "streamable_http"
+
+        raw_transport = payload.get("transport")
+        if isinstance(raw_transport, str):
+            normalized = raw_transport.strip().lower()
+            transport_alias_map = {
+                "streamablehttp": "streamable_http",
+                "http": "streamable_http",
+                "stdio": "stdio",
+                "sse": "sse",
+            }
+            payload["transport"] = transport_alias_map.get(
+                normalized,
+                normalized,
+            )
+
+        return payload
+
+    @model_validator(mode="after")
+    def _validate_transport_config(self):
+        """Validate required fields for each MCP transport type."""
+        if self.transport == "stdio":
+            if not self.command.strip():
+                raise ValueError("stdio MCP client requires non-empty command")
+            return self
+
+        if not self.url.strip():
+            raise ValueError(
+                f"{self.transport} MCP client requires non-empty url",
+            )
+        return self
 
 
 class MCPConfig(BaseModel):

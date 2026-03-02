@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 
 from fastapi import APIRouter, Body, HTTPException, Path
 from pydantic import BaseModel, Field
@@ -21,29 +21,33 @@ class MCPClientInfo(BaseModel):
     name: str = Field(..., description="Client display name")
     description: str = Field(default="", description="Client description")
     enabled: bool = Field(..., description="Whether the client is enabled")
-    transport: str = Field(
-        default="stdio",
-        description='Transport: "stdio", "sse", or "streamable_http"',
-    )
-    command: str = Field(
-        default="",
-        description="Command to launch the MCP server (stdio)",
-    )
-    args: List[str] = Field(
-        default_factory=list,
-        description="Command-line arguments (stdio)",
-    )
-    env: Dict[str, str] = Field(
-        default_factory=dict,
-        description="Environment variables (stdio)",
+    transport: Literal["stdio", "streamable_http", "sse"] = Field(
+        ...,
+        description="MCP transport type",
     )
     url: str = Field(
         default="",
-        description="Server URL (sse / streamable_http)",
+        description="Remote MCP endpoint URL (for HTTP/SSE transports)",
     )
     headers: Dict[str, str] = Field(
         default_factory=dict,
-        description="HTTP headers (sse / streamable_http)",
+        description="HTTP headers for remote transport",
+    )
+    command: str = Field(
+        default="",
+        description="Command to launch the MCP server",
+    )
+    args: List[str] = Field(
+        default_factory=list,
+        description="Command-line arguments",
+    )
+    env: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Environment variables",
+    )
+    cwd: str = Field(
+        default="",
+        description="Working directory for stdio MCP command",
     )
 
 
@@ -56,29 +60,33 @@ class MCPClientCreateRequest(BaseModel):
         default=True,
         description="Whether to enable the client",
     )
-    transport: str = Field(
+    transport: Literal["stdio", "streamable_http", "sse"] = Field(
         default="stdio",
-        description='Transport: "stdio", "sse", or "streamable_http"',
-    )
-    command: str = Field(
-        default="",
-        description="Command to launch the MCP server (stdio)",
-    )
-    args: List[str] = Field(
-        default_factory=list,
-        description="Command-line arguments (stdio)",
-    )
-    env: Dict[str, str] = Field(
-        default_factory=dict,
-        description="Environment variables (stdio)",
+        description="MCP transport type",
     )
     url: str = Field(
         default="",
-        description="Server URL (sse / streamable_http)",
+        description="Remote MCP endpoint URL (for HTTP/SSE transports)",
     )
     headers: Dict[str, str] = Field(
         default_factory=dict,
-        description="HTTP headers (sse / streamable_http)",
+        description="HTTP headers for remote transport",
+    )
+    command: str = Field(
+        default="",
+        description="Command to launch the MCP server",
+    )
+    args: List[str] = Field(
+        default_factory=list,
+        description="Command-line arguments",
+    )
+    env: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Environment variables",
+    )
+    cwd: str = Field(
+        default="",
+        description="Working directory for stdio MCP command",
     )
 
 
@@ -91,29 +99,33 @@ class MCPClientUpdateRequest(BaseModel):
         None,
         description="Whether to enable the client",
     )
-    transport: Optional[str] = Field(
+    transport: Optional[Literal["stdio", "streamable_http", "sse"]] = Field(
         None,
-        description='Transport: "stdio", "sse", or "streamable_http"',
-    )
-    command: Optional[str] = Field(
-        None,
-        description="Command to launch the MCP server (stdio)",
-    )
-    args: Optional[List[str]] = Field(
-        None,
-        description="Command-line arguments (stdio)",
-    )
-    env: Optional[Dict[str, str]] = Field(
-        None,
-        description="Environment variables (stdio)",
+        description="MCP transport type",
     )
     url: Optional[str] = Field(
         None,
-        description="Server URL (sse / streamable_http)",
+        description="Remote MCP endpoint URL (for HTTP/SSE transports)",
     )
     headers: Optional[Dict[str, str]] = Field(
         None,
-        description="HTTP headers (sse / streamable_http)",
+        description="HTTP headers for remote transport",
+    )
+    command: Optional[str] = Field(
+        None,
+        description="Command to launch the MCP server",
+    )
+    args: Optional[List[str]] = Field(
+        None,
+        description="Command-line arguments",
+    )
+    env: Optional[Dict[str, str]] = Field(
+        None,
+        description="Environment variables",
+    )
+    cwd: Optional[str] = Field(
+        None,
+        description="Working directory for stdio MCP command",
     )
 
 
@@ -169,11 +181,12 @@ def _build_client_info(key: str, client: MCPClientConfig) -> MCPClientInfo:
         description=client.description,
         enabled=client.enabled,
         transport=client.transport,
+        url=client.url,
+        headers=masked_headers,
         command=client.command,
         args=client.args,
         env=masked_env,
-        url=client.url,
-        headers=masked_headers,
+        cwd=client.cwd,
     )
 
 
@@ -232,11 +245,12 @@ async def create_mcp_client(
         description=client.description,
         enabled=client.enabled,
         transport=client.transport,
+        url=client.url,
+        headers=client.headers,
         command=client.command,
         args=client.args,
         env=client.env,
-        url=client.url,
-        headers=client.headers,
+        cwd=client.cwd,
     )
 
     # Add to config and save
@@ -278,13 +292,15 @@ async def update_mcp_client(
         updated_headers.update(update_data["headers"])
         update_data["headers"] = updated_headers
 
-    for field, value in update_data.items():
-        setattr(existing, field, value)
+    merged_data = existing.model_dump(mode="json")
+    merged_data.update(update_data)
+    updated_client = MCPClientConfig.model_validate(merged_data)
+    config.mcp.clients[client_key] = updated_client
 
     # Save updated config
     save_config(config)
 
-    return _build_client_info(client_key, existing)
+    return _build_client_info(client_key, updated_client)
 
 
 @router.patch(

@@ -16,6 +16,7 @@ interface MCPClientDrawerProps {
       enabled?: boolean;
       args?: string[];
       env?: Record<string, string>;
+      cwd?: string;
       url?: string;
       headers?: Record<string, string>;
     },
@@ -69,6 +70,7 @@ export function MCPClientDrawer({
           ? values.args.split(" ").filter(Boolean)
           : [];
         clientData.env = values.env ? JSON.parse(values.env) : {};
+        clientData.cwd = values.cwd ?? "";
       } else {
         clientData.url = values.url;
         clientData.headers = values.headers
@@ -182,6 +184,10 @@ export function MCPClientDrawer({
                 rows={4}
                 placeholder={t("mcp.envPlaceholder")}
               />
+            </Form.Item>
+
+            <Form.Item name="cwd" label={t("mcp.cwd")}>
+              <Input placeholder={t("mcp.cwdPlaceholder")} />
             </Form.Item>
           </>
         )}

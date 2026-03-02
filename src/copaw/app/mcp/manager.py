@@ -197,6 +197,7 @@ class MCPClientManager:
                 command=client_config.command,
                 args=client_config.args,
                 env=client_config.env,
+                cwd=client_config.cwd or None,
             )
 
         # sse or streamable_http

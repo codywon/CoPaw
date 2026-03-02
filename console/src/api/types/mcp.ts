@@ -22,6 +22,8 @@ export interface MCPClientInfo {
   args: string[];
   /** Environment variables (stdio) */
   env: Record<string, string>;
+  /** Working directory for stdio command */
+  cwd: string;
   /** Server URL (sse / streamable_http) */
   url: string;
   /** HTTP headers (sse / streamable_http) */
@@ -47,6 +49,8 @@ export interface MCPClientCreateRequest {
     args?: string[];
     /** Environment variables (stdio) */
     env?: Record<string, string>;
+    /** Working directory for stdio command */
+    cwd?: string;
     /** Server URL (sse / streamable_http) */
     url?: string;
     /** HTTP headers (sse / streamable_http) */
@@ -69,6 +73,8 @@ export interface MCPClientUpdateRequest {
   args?: string[];
   /** Environment variables (stdio) */
   env?: Record<string, string>;
+  /** Working directory for stdio command */
+  cwd?: string;
   /** Server URL (sse / streamable_http) */
   url?: string;
   /** HTTP headers (sse / streamable_http) */

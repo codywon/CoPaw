@@ -124,6 +124,8 @@
     "env": "Environment Variables",
     "envHelp": "JSON object of environment variables",
     "envPlaceholder": "{\"API_KEY\": \"your-key\"}",
+    "cwd": "Working Directory",
+    "cwdPlaceholder": "e.g., /path/to/workdir",
     "url": "Server URL",
     "urlRequired": "URL is required for SSE / Streamable HTTP transport",
     "urlPlaceholder": "e.g., http://localhost:8080/sse",

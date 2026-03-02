@@ -124,6 +124,8 @@
     "env": "环境变量",
     "envHelp": "JSON 格式的环境变量",
     "envPlaceholder": "{\"API_KEY\": \"your-key\"}",
+    "cwd": "Working Directory",
+    "cwdPlaceholder": "e.g., /path/to/workdir",
     "url": "服务器 URL",
     "urlRequired": "SSE / Streamable HTTP 模式下 URL 不能为空",
     "urlPlaceholder": "例如：http://localhost:8080/sse",

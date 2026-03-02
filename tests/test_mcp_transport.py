@@ -1,6 +1,7 @@
 """Tests for MCP multi-transport support (stdio, sse, streamable_http)."""
 
 import pytest
+from pydantic import ValidationError
 from copaw.config.config import MCPClientConfig, Config
 from copaw.app.mcp.manager import MCPClientManager, _VALID_TRANSPORTS
 
@@ -34,6 +35,26 @@ class TestMCPClientConfig:
         )
         assert cfg.transport == "streamable_http"
 
+    def test_stdio_cwd_config(self):
+        cfg = MCPClientConfig(name="local", command="npx", cwd="/tmp/mcp")
+        assert cfg.transport == "stdio"
+        assert cfg.cwd == "/tmp/mcp"
+
+    def test_legacy_alias_fields_normalized(self):
+        cfg = MCPClientConfig(
+            name="legacy",
+            isActive=False,
+            type="http",
+            baseUrl="http://localhost:8080/mcp",
+        )
+        assert cfg.enabled is False
+        assert cfg.transport == "streamable_http"
+        assert cfg.url == "http://localhost:8080/mcp"
+
+    def test_url_without_command_defaults_streamable_http(self):
+        cfg = MCPClientConfig(name="auto", url="http://localhost:8080/mcp")
+        assert cfg.transport == "streamable_http"
+
     def test_json_roundtrip(self):
         original = MCPClientConfig(
             name="rt",
@@ -59,6 +80,22 @@ class TestMCPClientConfig:
         restored = Config(**dump)
         assert restored.mcp.clients["remote"].transport == "sse"
         assert restored.mcp.clients["local"].transport == "stdio"
+
+    def test_invalid_transport_rejected_by_model(self):
+        with pytest.raises(ValidationError):
+            MCPClientConfig(
+                name="bad",
+                transport="websocket",
+                url="ws://localhost",
+            )
+
+    def test_stdio_missing_command_rejected_by_model(self):
+        with pytest.raises(ValidationError, match="non-empty command"):
+            MCPClientConfig(name="bad", transport="stdio")
+
+    def test_remote_missing_url_rejected_by_model(self):
+        with pytest.raises(ValidationError, match="non-empty url"):
+            MCPClientConfig(name="bad", transport="sse")
 
 
 class TestMCPClientManager:
@@ -87,19 +124,50 @@ class TestMCPClientManager:
         assert isinstance(client, HttpStatefulClient)
 
     def test_invalid_transport_raises(self):
-        cfg = MCPClientConfig(
-            name="bad", transport="websocket", url="ws://localhost",
+        cfg = MCPClientConfig.model_construct(
+            name="bad",
+            transport="websocket",
+            url="ws://localhost",
+            command="",
+            args=[],
+            env={},
+            headers={},
+            cwd="",
+            description="",
+            enabled=True,
         )
         with pytest.raises(ValueError, match="websocket"):
             MCPClientManager._create_client(cfg)
 
     def test_stdio_missing_command_raises(self):
-        cfg = MCPClientConfig(name="bad", transport="stdio")
+        cfg = MCPClientConfig.model_construct(
+            name="bad",
+            transport="stdio",
+            command="",
+            args=[],
+            env={},
+            headers={},
+            cwd="",
+            url="",
+            description="",
+            enabled=True,
+        )
         with pytest.raises(ValueError, match="command"):
             MCPClientManager._create_client(cfg)
 
     def test_sse_missing_url_raises(self):
-        cfg = MCPClientConfig(name="bad", transport="sse")
+        cfg = MCPClientConfig.model_construct(
+            name="bad",
+            transport="sse",
+            command="echo",
+            args=[],
+            env={},
+            headers={},
+            cwd="",
+            url="",
+            description="",
+            enabled=True,
+        )
         with pytest.raises(ValueError, match="url"):
             MCPClientManager._create_client(cfg)
 
