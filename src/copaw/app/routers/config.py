@@ -13,7 +13,7 @@ from ...config import (
     ChannelConfigUnion,
 )
 
-from ...constant import get_available_channels
+from ...config import get_available_channels
 
 router = APIRouter(prefix="/config", tags=["config"])
 logger = logging.getLogger(__name__)
