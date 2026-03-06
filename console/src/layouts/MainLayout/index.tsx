@@ -4,10 +4,12 @@ import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
 import ConsoleCronBubble from "../../components/ConsoleCronBubble";
+import styles from "../index.module.less";
 import Chat from "../../pages/Chat";
 import ChannelsPage from "../../pages/Control/Channels";
 import SessionsPage from "../../pages/Control/Sessions";
 import CronJobsPage from "../../pages/Control/CronJobs";
+import HeartbeatPage from "../../pages/Control/Heartbeat";
 import AgentConfigPage from "../../pages/Agent/Config";
 import SubagentsPage from "../../pages/Agent/Subagents";
 import SkillsPage from "../../pages/Agent/Skills";
@@ -23,6 +25,7 @@ const pathToKey: Record<string, string> = {
   "/channels": "channels",
   "/sessions": "sessions",
   "/cron-jobs": "cron-jobs",
+  "/heartbeat": "heartbeat",
   "/skills": "skills",
   "/mcp": "mcp",
   "/workspace": "workspace",
@@ -46,7 +49,7 @@ export default function MainLayout() {
   }, [currentPath, navigate]);
 
   return (
-    <Layout style={{ height: "100vh" }}>
+    <Layout className={styles.mainLayout}>
       <Sidebar selectedKey={selectedKey} />
       <Layout>
         <Header selectedKey={selectedKey} />
@@ -58,6 +61,7 @@ export default function MainLayout() {
               <Route path="/channels" element={<ChannelsPage />} />
               <Route path="/sessions" element={<SessionsPage />} />
               <Route path="/cron-jobs" element={<CronJobsPage />} />
+              <Route path="/heartbeat" element={<HeartbeatPage />} />
               <Route path="/skills" element={<SkillsPage />} />
               <Route path="/mcp" element={<MCPPage />} />
               <Route path="/subagents" element={<SubagentsPage />} />

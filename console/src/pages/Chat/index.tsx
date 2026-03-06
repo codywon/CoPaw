@@ -182,6 +182,7 @@ export default function ChatPage() {
     const customFetch = async (data: {
       input: any[];
       biz_params?: any;
+      signal?: AbortSignal;
     }): Promise<Response> => {
       try {
         const activeModels = await providerApi.getActiveModels();
@@ -231,6 +232,7 @@ export default function ChatPage() {
         method: "POST",
         headers,
         body: JSON.stringify(requestBody),
+        signal: data.signal,
       });
     };
 

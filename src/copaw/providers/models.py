@@ -94,16 +94,20 @@ class ProvidersData(BaseModel):
         return (s.base_url, s.api_key) if s else ("", "")
 
     def is_configured(self, defn: "ProviderDefinition") -> bool:
-        """Custom providers need base_url; built-in providers need api_key.
+        """Determine if a provider is configured/available.
 
-        Local providers are always considered configured (no credentials).
-
-        The special built-in provider ``ollama`` is also considered configured
-        without an API key, since it typically runs on localhost and uses an
-        unauthenticated OpenAI-compatible endpoint.
+        - Local providers are always configured (no credentials needed).
+        - Ollama is configured if it has base_url set.
+        - Custom providers need base_url.
+        - Built-in remote providers are configured if they exist in settings.
         """
-        if defn.is_local or defn.id == "ollama":
+        if defn.is_local:
             return True
+
+        if defn.id == "ollama":
+            s = self.providers.get(defn.id)
+            return bool(s and s.base_url) if s else False
+
         cpd = self.custom_providers.get(defn.id)
         if cpd is not None:
             return bool(cpd.base_url or cpd.default_base_url)
@@ -137,6 +141,10 @@ class ProviderInfo(BaseModel):
     has_api_key: bool = Field(default=False)
     current_api_key: str = Field(default="")
     current_base_url: str = Field(default="")
+    chat_model: str = Field(
+        default="OpenAIChatModel",
+        description="Chat model class name used by this provider",
+    )
 
 
 class ActiveModelsInfo(BaseModel):

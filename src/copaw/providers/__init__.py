@@ -25,6 +25,7 @@ from .store import (
     add_model,
     create_custom_provider,
     delete_custom_provider,
+    discover_provider_models,
     get_active_llm_config,
     load_providers_json,
     mask_api_key,
@@ -32,6 +33,8 @@ from .store import (
     resolve_llm_config,
     save_providers_json,
     set_active_llm,
+    test_model_connection,
+    test_provider_connection,
     update_provider_settings,
 )
 
@@ -55,6 +58,7 @@ __all__ = [
     "add_model",
     "create_custom_provider",
     "delete_custom_provider",
+    "discover_provider_models",
     "get_active_llm_config",
     "resolve_llm_config",
     "load_providers_json",
@@ -62,5 +66,7 @@ __all__ = [
     "remove_model",
     "save_providers_json",
     "set_active_llm",
+    "test_model_connection",
+    "test_provider_connection",
     "update_provider_settings",
 ]
