@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Watch config.json for changes and auto-reload channels."""
 
 from __future__ import annotations
@@ -9,10 +9,13 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from .utils import load_config, get_config_path
+from .utils import (
+    load_config,
+    get_config_path,
+    get_channel_instances,
+)
 from .config import ChannelConfig
 from ..app.channels import ChannelManager  # pylint: disable=no-name-in-module
-from .utils import get_available_channels
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,7 @@ class ConfigWatcher:
         self._last_channels: Optional[ChannelConfig] = None
         self._last_channels_hash: Optional[int] = None
         self._last_show_tool_details: Optional[bool] = None
+        self._last_show_reasoning: Optional[bool] = None
         # mtime of config.json at last check
         self._last_mtime: float = 0.0
 
@@ -77,11 +81,13 @@ class ConfigWatcher:
             self._last_channels = config.channels.model_copy(deep=True)
             self._last_channels_hash = self._channels_hash(config.channels)
             self._last_show_tool_details = config.show_tool_details
+            self._last_show_reasoning = config.show_reasoning
         except Exception:
             logger.exception("ConfigWatcher: failed to load initial config")
             self._last_channels = None
             self._last_channels_hash = None
             self._last_show_tool_details = None
+            self._last_show_reasoning = None
 
     @staticmethod
     def _channels_hash(channels: ChannelConfig) -> int:
@@ -115,27 +121,56 @@ class ConfigWatcher:
 
         new_hash = self._channels_hash(config.channels)
         new_show_tool_details = config.show_tool_details
+        new_show_reasoning = config.show_reasoning
         show_tool_details_changed = (
             self._last_show_tool_details is None
             or new_show_tool_details != self._last_show_tool_details
         )
-        if new_hash == self._last_channels_hash and not show_tool_details_changed:
+        show_reasoning_changed = (
+            self._last_show_reasoning is None
+            or new_show_reasoning != self._last_show_reasoning
+        )
+        if (
+            new_hash == self._last_channels_hash
+            and not show_tool_details_changed
+            and not show_reasoning_changed
+        ):
             return  # Only non-channel fields changed (e.g. last_dispatch)
 
-        # 3) Diff per-channel and reload changed ones
+        # 3) Diff per channel instance and reload changed ones
         new_channels = config.channels
         old_channels = self._last_channels
+        new_instances = get_channel_instances(new_channels)
+        old_instances = (
+            get_channel_instances(old_channels) if old_channels else {}
+        )
+        all_names = sorted(set(new_instances.keys()) | set(old_instances.keys()))
 
-        for name in get_available_channels():
-            new_ch = new_channels.get_channel_config(name)
-            old_ch = (
-                old_channels.get_channel_config(name)
-                if old_channels
-                else None
-            )
+        for name in all_names:
+            new_entry = new_instances.get(name)
+            old_entry = old_instances.get(name)
 
-            if new_ch is None:
+            if new_entry is None and old_entry is not None:
+                logger.info(
+                    "ConfigWatcher: channel instance '%s' removed, stopping",
+                    name,
+                )
+                try:
+                    await self._channel_manager.remove_channel(name)
+                except Exception:
+                    logger.exception(
+                        "ConfigWatcher: failed to remove channel '%s'",
+                        name,
+                    )
                 continue
+
+            if new_entry is None:
+                continue
+
+            new_type = str(new_entry.get("channel_type") or "").strip()
+            new_ch = new_entry.get("config")
+            old_type = str(old_entry.get("channel_type") or "").strip()
+            old_ch = old_entry.get("config") if old_entry else None
 
             if isinstance(new_ch, dict):
                 new_dump = new_ch
@@ -148,41 +183,44 @@ class ConfigWatcher:
                 )
                 old_dump = (
                     old_ch.model_dump(mode="json")
-                    if old_ch and hasattr(old_ch, "model_dump")
+                    if old_ch is not None and hasattr(old_ch, "model_dump")
                     else None
                 )
+
             if (
-                new_dump is not None
+                old_entry is not None
+                and new_type == old_type
+                and new_dump is not None
                 and new_dump == old_dump
                 and not show_tool_details_changed
+                and not show_reasoning_changed
             ):
                 continue
 
             logger.info(
-                f"ConfigWatcher: channel '{name}' config changed, reloading",
+                "ConfigWatcher: channel '%s' changed, reloading (type=%s)",
+                name,
+                new_type or "?",
             )
             try:
-                old_channel = await self._channel_manager.get_channel(name)
-                if old_channel is None:
-                    logger.warning(
-                        f"ConfigWatcher: channel '{name}' not found, skip",
-                    )
-                    continue
-                new_channel = old_channel.clone(
-                    new_ch,
+                new_channel = self._channel_manager.build_channel_from_config(
+                    channels_cfg=new_channels,
+                    instance_name=name,
+                    channel_type=new_type,
+                    raw_cfg=new_ch,
                     show_tool_details=new_show_tool_details,
+                    show_reasoning=new_show_reasoning,
                 )
                 await self._channel_manager.replace_channel(new_channel)
-                logger.info(f"ConfigWatcher: channel '{name}' reloaded")
+                logger.info("ConfigWatcher: channel '%s' reloaded", name)
             except Exception:
-                # Reload failed — keep old snapshot for this channel so
-                # the next config change will retry the reload.
                 logger.exception(
-                    f"ConfigWatcher: failed to reload channel '{name}'",
+                    "ConfigWatcher: failed to reload channel '%s'",
+                    name,
                 )
-                setattr(new_channels, name, old_ch if old_ch else new_ch)
 
         # 4) Update snapshot
         self._last_channels = new_channels.model_copy(deep=True)
         self._last_channels_hash = self._channels_hash(new_channels)
         self._last_show_tool_details = new_show_tool_details
+        self._last_show_reasoning = new_show_reasoning

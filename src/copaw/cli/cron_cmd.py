@@ -117,7 +117,7 @@ def _build_spec_from_cli(
     }
     runtime = {
         "max_concurrency": 1,
-        "timeout_seconds": 120,
+        "timeout_seconds": 600,
         "misfire_grace_seconds": 60,
     }
     if task_type == "text":

@@ -160,6 +160,7 @@ class FeishuChannel(BaseChannel):
         show_tool_details: bool = True,
         filter_tool_messages: bool = False,
         filter_thinking: bool = False,
+        show_reasoning: bool = True,
     ):
         super().__init__(
             process,
@@ -167,6 +168,7 @@ class FeishuChannel(BaseChannel):
             show_tool_details=show_tool_details,
             filter_tool_messages=filter_tool_messages,
             filter_thinking=filter_thinking,
+            show_reasoning=show_reasoning,
         )
         self.enabled = enabled
         self.app_id = app_id
@@ -225,6 +227,7 @@ class FeishuChannel(BaseChannel):
         show_tool_details: bool = True,
         filter_tool_messages: bool = False,
         filter_thinking: bool = False,
+        show_reasoning: bool = True,
     ) -> "FeishuChannel":
         return cls(
             process=process,
@@ -239,6 +242,7 @@ class FeishuChannel(BaseChannel):
             show_tool_details=show_tool_details,
             filter_tool_messages=filter_tool_messages,
             filter_thinking=filter_thinking,
+            show_reasoning=show_reasoning,
         )
 
     def resolve_session_id(

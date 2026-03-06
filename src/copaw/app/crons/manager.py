@@ -247,13 +247,14 @@ class CronManager:
         if not job:
             return
 
-        await self._execute_once(job)
-
-        # refresh next_run
-        aps_job = self._scheduler.get_job(job_id)
-        st = self._states.get(job_id, CronJobState())
-        st.next_run_at = aps_job.next_run_time if aps_job else None
-        self._states[job_id] = st
+        try:
+            await self._execute_once(job)
+        finally:
+            # refresh next_run even when execute fails
+            aps_job = self._scheduler.get_job(job_id)
+            st = self._states.get(job_id, CronJobState())
+            st.next_run_at = aps_job.next_run_time if aps_job else None
+            self._states[job_id] = st
 
     async def _heartbeat_callback(self) -> None:
         """Run one heartbeat (HEARTBEAT.md as query, optional dispatch)."""

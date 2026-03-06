@@ -11,6 +11,7 @@ import SessionsPage from "../../pages/Control/Sessions";
 import CronJobsPage from "../../pages/Control/CronJobs";
 import HeartbeatPage from "../../pages/Control/Heartbeat";
 import AgentConfigPage from "../../pages/Agent/Config";
+import BotProfilesPage from "../../pages/Agent/BotProfiles";
 import SubagentsPage from "../../pages/Agent/Subagents";
 import SkillsPage from "../../pages/Agent/Skills";
 import WorkspacePage from "../../pages/Agent/Workspace";
@@ -33,6 +34,7 @@ const pathToKey: Record<string, string> = {
   "/models": "models",
   "/environments": "environments",
   "/agent-config": "agent-config",
+  "/bot-profiles": "bot-profiles",
   "/subagents": "subagents",
 };
 
@@ -69,6 +71,7 @@ export default function MainLayout() {
               <Route path="/models" element={<ModelsPage />} />
               <Route path="/environments" element={<EnvironmentsPage />} />
               <Route path="/agent-config" element={<AgentConfigPage />} />
+              <Route path="/bot-profiles" element={<BotProfilesPage />} />
               <Route path="/" element={<Chat />} />
             </Routes>
           </div>

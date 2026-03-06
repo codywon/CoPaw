@@ -1,4 +1,4 @@
-from copaw.config.config import (
+﻿from copaw.config.config import (
     AgentsConfig,
     SubagentRoleConfig,
     SubagentsConfig,
@@ -35,8 +35,34 @@ def test_subagents_keywords_mojibake_is_normalized():
             "parallel",
             "\u03b5\u0389\u0386\u03b8\u2018\u008c",
             "\u03b6\u0089\u0389\u03b9\u0087\u008f",
-            "骞惰",
-            "鎵归噺",
         ],
     )
     assert cfg.auto_dispatch_keywords == ["parallel", "并行", "批量"]
+
+
+def test_subagents_keywords_question_placeholders_are_removed():
+    cfg = SubagentsConfig(
+        auto_dispatch_keywords=[
+            "parallel",
+            "??",
+            "？",
+            "batch",
+            " ? ? ",
+        ],
+    )
+    assert cfg.auto_dispatch_keywords == ["parallel", "batch"]
+
+
+def test_role_routing_keywords_question_placeholders_are_removed():
+    role = SubagentRoleConfig(
+        key="research",
+        name="Research Agent",
+        routing_keywords=[
+            "research",
+            "??",
+            " ? ? ",
+            "batch",
+            "batch",
+        ],
+    )
+    assert role.routing_keywords == ["research", "batch"]

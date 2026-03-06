@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from .models import ChatSpec
 from .repo import BaseChatRepository
@@ -76,6 +76,7 @@ class ChatManager:
         user_id: str,
         channel: str = DEFAULT_CHANNEL,
         name: str = "New Chat",
+        meta: Optional[Dict[str, Any]] = None,
     ) -> ChatSpec:
         """Get existing chat or create new one.
 
@@ -98,6 +99,10 @@ class ChatManager:
                 channel,
             )
             if existing:
+                if meta:
+                    existing.meta = dict(meta)
+                    existing.updated_at = datetime.utcnow()
+                    await self._repo.upsert_chat(existing)
                 return existing
 
             # Create new
@@ -106,6 +111,7 @@ class ChatManager:
                 user_id=user_id,
                 channel=channel,
                 name=name,
+                meta=dict(meta or {}),
             )
             # Call internal create without lock (already locked)
             await self._repo.upsert_chat(spec)

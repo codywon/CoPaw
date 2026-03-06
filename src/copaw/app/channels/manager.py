@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from types import SimpleNamespace
 
 from typing import (
     Callable,
@@ -22,6 +23,7 @@ from typing import (
 from .base import BaseChannel, ContentType, ProcessHandler, TextContent
 from .registry import get_channel_registry
 from ...config import get_available_channels
+from ...config.utils import get_channel_instances
 
 if TYPE_CHECKING:
     from ...config.config import ChannelConfig, Config
@@ -115,8 +117,19 @@ class ChannelManager:
     consume_one(). Enqueue via enqueue(channel_id, payload) (thread-safe).
     """
 
-    def __init__(self, channels: List[BaseChannel]):
+    def __init__(
+        self,
+        channels: List[BaseChannel],
+        process: Optional[ProcessHandler] = None,
+        on_last_dispatch: OnLastDispatch = None,
+        show_tool_details: bool = True,
+        show_reasoning: bool = True,
+    ):
         self.channels = channels
+        self._process = process
+        self._on_last_dispatch = on_last_dispatch
+        self._show_tool_details = show_tool_details
+        self._show_reasoning = show_reasoning
         self._lock = asyncio.Lock()
         self._queues: Dict[str, asyncio.Queue] = {}
         self._consumer_tasks: List[asyncio.Task[None]] = []
@@ -151,7 +164,11 @@ class ChannelManager:
             for key, ch_cls in registry.items()
             if key in available
         ]
-        return cls(channels)
+        return cls(
+            channels,
+            process=process,
+            on_last_dispatch=on_last_dispatch,
+        )
 
     @classmethod
     def from_config(
@@ -161,30 +178,127 @@ class ChannelManager:
         on_last_dispatch: OnLastDispatch = None,
     ) -> "ChannelManager":
         """Create channels from config (config.json)."""
-        available = get_available_channels()
-        ch = config.channels
         show_tool_details = config.show_tool_details
-
+        show_reasoning = config.show_reasoning
+        manager = cls(
+            channels=[],
+            process=process,
+            on_last_dispatch=on_last_dispatch,
+            show_tool_details=show_tool_details,
+            show_reasoning=show_reasoning,
+        )
         channels: list[BaseChannel] = []
-        for key, ch_cls in get_channel_registry().items():
-            if key not in available:
+        for instance_name, entry in get_channel_instances(config.channels).items():
+            channel_type = str(entry.get("channel_type") or "").strip()
+            ch_cfg = entry.get("config")
+            if not channel_type:
                 continue
-            ch_cfg = ch.get_channel_config(key)
-            if ch_cfg is not None and isinstance(ch_cfg, dict):
-                from types import SimpleNamespace
+            try:
+                channels.append(
+                    manager.build_channel_from_config(
+                        channels_cfg=config.channels,
+                        instance_name=instance_name,
+                        channel_type=channel_type,
+                        raw_cfg=ch_cfg,
+                    ),
+                )
+            except Exception:
+                logger.exception(
+                    "failed to create channel instance '%s' (type=%s)",
+                    instance_name,
+                    channel_type,
+                )
+        manager.channels = channels
+        return manager
 
-                ch_cfg = SimpleNamespace(**ch_cfg)
-            if ch_cfg is None:
-                continue
-            channels.append(
-                ch_cls.from_config(
-                    process,
-                    ch_cfg,
-                    on_reply_sent=on_last_dispatch,
-                    show_tool_details=show_tool_details,
-                ),
+    @staticmethod
+    def _get_channel_type(channel: BaseChannel) -> str:
+        """Return logical channel type for a runtime channel instance."""
+        channel_type = getattr(channel, "_channel_type", None)
+        if isinstance(channel_type, str) and channel_type.strip():
+            return channel_type.strip()
+        return str(channel.channel)
+
+    @staticmethod
+    def _mark_channel_identity(
+        channel: BaseChannel,
+        instance_name: str,
+        channel_type: str,
+    ) -> None:
+        """Attach runtime instance id and original channel type."""
+        channel.channel = instance_name
+        setattr(channel, "_channel_type", channel_type)
+
+    def _normalize_runtime_config(
+        self,
+        channels_cfg: "ChannelConfig",
+        channel_type: str,
+        raw_cfg: Any,
+    ) -> Any:
+        """Normalize raw config for channel class from_config().
+
+        For instance dicts, merge defaults from base channel type so class
+        implementations that access attributes directly are safe.
+        """
+        if not isinstance(raw_cfg, dict):
+            return raw_cfg
+        base_cfg = channels_cfg.get_channel_config(channel_type)
+        merged: Dict[str, Any] = {}
+        if isinstance(base_cfg, dict):
+            merged.update(base_cfg)
+        elif base_cfg is not None and hasattr(base_cfg, "model_dump"):
+            merged.update(base_cfg.model_dump(mode="json"))
+        merged.update(raw_cfg)
+        merged.pop("channel_type", None)
+        return SimpleNamespace(**merged)
+
+    def build_channel_from_config(
+        self,
+        *,
+        channels_cfg: "ChannelConfig",
+        instance_name: str,
+        channel_type: str,
+        raw_cfg: Any,
+        show_tool_details: Optional[bool] = None,
+        show_reasoning: Optional[bool] = None,
+    ) -> BaseChannel:
+        """Build one runtime channel instance from config."""
+        if self._process is None:
+            raise RuntimeError(
+                "channel manager process is not set; cannot build channel",
             )
-        return cls(channels)
+        registry = get_channel_registry()
+        ch_cls = registry.get(channel_type)
+        if ch_cls is None:
+            raise KeyError(f"unknown channel type: {channel_type}")
+        runtime_cfg = self._normalize_runtime_config(
+            channels_cfg=channels_cfg,
+            channel_type=channel_type,
+            raw_cfg=raw_cfg,
+        )
+        resolved_show_tool_details = (
+            self._show_tool_details
+            if show_tool_details is None
+            else show_tool_details
+        )
+        resolved_show_reasoning = (
+            self._show_reasoning
+            if show_reasoning is None
+            else show_reasoning
+        )
+        channel = ch_cls.from_config(
+            self._process,
+            runtime_cfg,
+            on_reply_sent=self._on_last_dispatch,
+            show_tool_details=resolved_show_tool_details,
+            show_reasoning=resolved_show_reasoning,
+        )
+        self._mark_channel_identity(
+            channel,
+            instance_name=instance_name,
+            channel_type=channel_type,
+        )
+        return channel
 
     def _make_enqueue_cb(self, channel_id: str) -> Callable[[Any], None]:
         """Return a callback that enqueues payload for the given channel."""
@@ -412,30 +526,100 @@ class ChannelManager:
                         f"Failed to stop old channel: {old_channel.channel}",
                     )
 
+    async def remove_channel(self, channel_name: str) -> None:
+        """Remove one channel instance and stop its worker/tasks."""
+        old_channel = None
+        async with self._lock:
+            for i, ch in enumerate(self.channels):
+                if ch.channel == channel_name:
+                    old_channel = self.channels.pop(i)
+                    break
+
+        if old_channel is None:
+            return
+
+        old_channel.set_enqueue(None)
+        try:
+            await old_channel.stop()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("failed to stop removed channel=%s", channel_name)
+
+        self._queues.pop(channel_name, None)
+
+        self._in_progress = {
+            item for item in self._in_progress if item[0] != channel_name
+        }
+        for key in [k for k in self._pending if k[0] == channel_name]:
+            self._pending.pop(key, None)
+        for key in [k for k in self._key_locks if k[0] == channel_name]:
+            self._key_locks.pop(key, None)
+
+        prefix = f"channel_consumer_{channel_name}_"
+        tasks_to_cancel = [
+            task
+            for task in self._consumer_tasks
+            if task.get_name().startswith(prefix)
+        ]
+        for task in tasks_to_cancel:
+            task.cancel()
+        if tasks_to_cancel:
+            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+        self._consumer_tasks = [
+            task for task in self._consumer_tasks if task not in tasks_to_cancel
+        ]
+
     async def apply_show_tool_details(
         self,
         channels_cfg: "ChannelConfig",
         show_tool_details: bool,
+        show_reasoning: bool | None = None,
     ) -> None:
-        """Clone+replace all channels with an updated show_tool_details flag."""
-        from ...constant import get_available_channels
+        """Clone+replace channel instances with updated render flags."""
+        self._show_tool_details = show_tool_details
+        if show_reasoning is not None:
+            self._show_reasoning = show_reasoning
 
-        for name in get_available_channels():
-            ch_cfg = channels_cfg.get_channel_config(name)
-            if ch_cfg is None:
+        for name, entry in get_channel_instances(channels_cfg).items():
+            channel_type = str(entry.get("channel_type") or "").strip()
+            ch_cfg = entry.get("config")
+            if not channel_type:
                 continue
             try:
                 old_channel = await self.get_channel(name)
-                if old_channel is None:
-                    continue
-                new_channel = old_channel.clone(
-                    ch_cfg,
-                    show_tool_details=show_tool_details,
-                )
+                if (
+                    old_channel is not None
+                    and self._get_channel_type(old_channel) == channel_type
+                ):
+                    runtime_cfg = self._normalize_runtime_config(
+                        channels_cfg=channels_cfg,
+                        channel_type=channel_type,
+                        raw_cfg=ch_cfg,
+                    )
+                    new_channel = old_channel.clone(
+                        runtime_cfg,
+                        show_tool_details=show_tool_details,
+                        show_reasoning=show_reasoning,
+                    )
+                    self._mark_channel_identity(
+                        new_channel,
+                        instance_name=name,
+                        channel_type=channel_type,
+                    )
+                else:
+                    new_channel = self.build_channel_from_config(
+                        channels_cfg=channels_cfg,
+                        instance_name=name,
+                        channel_type=channel_type,
+                        raw_cfg=ch_cfg,
+                        show_tool_details=show_tool_details,
+                        show_reasoning=show_reasoning,
+                    )
                 await self.replace_channel(new_channel)
             except Exception:
                 logger.exception(
-                    "Failed to apply show_tool_details to channel '%s'",
+                    "Failed to apply render visibility flags to channel '%s'",
                     name,
                 )
 

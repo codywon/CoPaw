@@ -43,6 +43,7 @@ class DiscordChannel(BaseChannel):
         show_tool_details: bool = True,
         filter_tool_messages: bool = False,
         filter_thinking: bool = False,
+        show_reasoning: bool = True,
     ):
         super().__init__(
             process,
@@ -50,6 +51,7 @@ class DiscordChannel(BaseChannel):
             show_tool_details=show_tool_details,
             filter_tool_messages=filter_tool_messages,
             filter_thinking=filter_thinking,
+            show_reasoning=show_reasoning,
         )
         self.enabled = enabled
         self.token = token
@@ -212,6 +214,7 @@ class DiscordChannel(BaseChannel):
         show_tool_details: bool = True,
         filter_tool_messages: bool = False,
         filter_thinking: bool = False,
+        show_reasoning: bool = True,
     ) -> "DiscordChannel":
         return cls(
             process=process,
@@ -224,6 +227,7 @@ class DiscordChannel(BaseChannel):
             show_tool_details=show_tool_details,
             filter_tool_messages=filter_tool_messages,
             filter_thinking=filter_thinking,
+            show_reasoning=show_reasoning,
         )
 
     async def _send_with_retry(

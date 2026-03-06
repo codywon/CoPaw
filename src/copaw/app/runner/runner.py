@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+from typing import Dict
 
 from agentscope.pipeline import stream_printing_messages
 from agentscope.tool import Toolkit
@@ -17,6 +18,11 @@ from .command_dispatch import (
     run_command_path,
 )
 from .query_error_dump import write_query_error_dump
+from ..bot_profiles import (
+    extract_requested_bot_id,
+    namespace_session_id,
+    resolve_bot_profile,
+)
 from .session import SafeJSONSession
 from .utils import build_env_context
 from ..channels.schema import DEFAULT_CHANNEL
@@ -40,7 +46,9 @@ class AgentRunner(Runner):
         self.framework_type = "agentscope"
         self._chat_manager = None  # Store chat_manager reference
         self._mcp_manager = None  # MCP client manager for hot-reload
-        self.memory_manager: MemoryManager | None = None
+
+        self._memory_managers: Dict[str, MemoryManager] = {}
+        self._memory_manager_lock = asyncio.Lock()
 
     def set_chat_manager(self, chat_manager):
         """Set chat manager for auto-registration.
@@ -78,18 +86,37 @@ class AgentRunner(Runner):
         agent = None
         chat = None
         session_state_loaded = False
+        raw_session_id = ""
+        namespaced_session_id = ""
+        user_id = ""
+        channel = DEFAULT_CHANNEL
+
         try:
-            session_id = request.session_id
+            raw_session_id = request.session_id
             user_id = request.user_id
             channel = getattr(request, "channel", DEFAULT_CHANNEL)
+            config = load_config()
+            requested_bot_id = extract_requested_bot_id(request)
+            resolved_bot = resolve_bot_profile(
+                profiles_config=config.agents.bot_profiles,
+                channel=channel,
+                requested_bot_id=requested_bot_id,
+            )
+            namespaced_session_id = namespace_session_id(
+                bot_key=resolved_bot.key,
+                session_id=raw_session_id,
+            )
 
             logger.info(
                 "Handle agent query:\n%s",
                 json.dumps(
                     {
-                        "session_id": session_id,
+                        "session_id": raw_session_id,
+                        "namespaced_session_id": namespaced_session_id,
                         "user_id": user_id,
                         "channel": channel,
+                        "bot_id": resolved_bot.key,
+                        "bot_source": resolved_bot.source,
                         "msgs_len": len(msgs) if msgs else 0,
                         "msgs_str": str(msgs)[:300] + "...",
                     },
@@ -99,29 +126,43 @@ class AgentRunner(Runner):
             )
 
             env_context = build_env_context(
-                session_id=session_id,
+                session_id=namespaced_session_id,
                 user_id=user_id,
                 channel=channel,
                 working_dir=str(WORKING_DIR),
             )
+            env_context += (
+                "\n\n# Bot Profile\n"
+                f"- bot_id: {resolved_bot.key}\n"
+                f"- bot_name: {resolved_bot.name}\n"
+                f"- resolve_source: {resolved_bot.source}\n"
+                f"- original_session_id: {raw_session_id}\n"
+            )
+            if resolved_bot.identity_prompt:
+                env_context += (
+                    "\n# Bot Identity\n"
+                    f"{resolved_bot.identity_prompt}\n"
+                )
 
             # Get MCP clients from manager (hot-reloadable)
             mcp_clients = []
             if self._mcp_manager is not None:
                 mcp_clients = await self._mcp_manager.get_clients()
 
-            config = load_config()
             max_iters = config.agents.running.max_iters
             max_input_length = config.agents.running.max_input_length
+            memory_manager = await self._get_or_create_memory_manager(
+                resolved_bot.key,
+            )
 
             agent = CoPawAgent(
                 env_context=env_context,
                 mcp_clients=mcp_clients,
-                memory_manager=self.memory_manager,
+                memory_manager=memory_manager,
                 max_iters=max_iters,
                 max_input_length=max_input_length,
                 agent_role="main",
-                session_id=session_id,
+                session_id=namespaced_session_id,
                 user_id=user_id,
                 channel=channel,
                 subagents_config=config.agents.subagents,
@@ -143,15 +184,20 @@ class AgentRunner(Runner):
 
             if self._chat_manager is not None:
                 chat = await self._chat_manager.get_or_create_chat(
-                    session_id,
+                    namespaced_session_id,
                     user_id,
                     channel,
                     name=name,
+                    meta={
+                        "bot_id": resolved_bot.key,
+                        "bot_name": resolved_bot.name,
+                        "source_session_id": raw_session_id,
+                    },
                 )
 
             try:
                 await self.session.load_session_state(
-                    session_id=session_id,
+                    session_id=namespaced_session_id,
                     user_id=user_id,
                     agent=agent,
                 )
@@ -175,7 +221,7 @@ class AgentRunner(Runner):
                 yield msg, last
 
         except asyncio.CancelledError as exc:
-            logger.info(f"query_handler: {session_id} cancelled!")
+            logger.info(f"query_handler: {namespaced_session_id} cancelled!")
             if agent is not None:
                 await agent.interrupt()
             raise RuntimeError("Task has been cancelled!") from exc
@@ -203,7 +249,7 @@ class AgentRunner(Runner):
         finally:
             if agent is not None and session_state_loaded:
                 await self.session.save_session_state(
-                    session_id=session_id,
+                    session_id=namespaced_session_id,
                     user_id=user_id,
                     agent=agent,
                 )
@@ -230,34 +276,9 @@ class AgentRunner(Runner):
         self.session = SafeJSONSession(save_dir=session_dir)
 
         try:
-            if self.memory_manager is None:
-                # Get config for memory manager
-                config = load_config()
-                max_input_length = config.agents.running.max_input_length
-
-                # Create model and formatter
-                chat_model, formatter = create_model_and_formatter()
-
-                # Get token counter
-                token_counter = _get_token_counter()
-
-                # Create toolkit for memory manager
-                toolkit = Toolkit()
-                toolkit.register_tool_function(read_file)
-                toolkit.register_tool_function(write_file)
-                toolkit.register_tool_function(edit_file)
-
-                # Initialize MemoryManager with new parameters
-                self.memory_manager = MemoryManager(
-                    working_dir=str(WORKING_DIR),
-                    chat_model=chat_model,
-                    formatter=formatter,
-                    token_counter=token_counter,
-                    toolkit=toolkit,
-                    max_input_length=max_input_length,
-                    memory_compact_ratio=MEMORY_COMPACT_RATIO,
-                )
-            await self.memory_manager.start()
+            config = load_config()
+            default_bot = config.agents.bot_profiles.default_bot
+            await self._get_or_create_memory_manager(default_bot)
         except Exception as e:
             logger.exception(f"MemoryManager start failed: {e}")
 
@@ -265,7 +286,37 @@ class AgentRunner(Runner):
         """
         Shutdown handler.
         """
-        try:
-            await self.memory_manager.close()
-        except Exception as e:
-            logger.warning(f"MemoryManager stop failed: {e}")
+        for bot_key, manager in list(self._memory_managers.items()):
+            try:
+                await manager.close()
+            except Exception as e:
+                logger.warning(
+                    "MemoryManager stop failed for bot=%s: %s",
+                    bot_key,
+                    e,
+                )
+        self._memory_managers.clear()
+
+    async def _get_or_create_memory_manager(
+        self,
+        bot_key: str,
+    ) -> MemoryManager:
+        normalized_bot_key = (bot_key or "default").strip() or "default"
+        async with self._memory_manager_lock:
+            manager = self._memory_managers.get(normalized_bot_key)
+            if manager is not None:
+                return manager
+
+            working_dir = WORKING_DIR / "bot_profiles" / normalized_bot_key
+            working_dir.mkdir(parents=True, exist_ok=True)
+            manager = MemoryManager(
+                working_dir=str(working_dir),
+            )
+            await manager.start()
+            self._memory_managers[normalized_bot_key] = manager
+            logger.info(
+                "MemoryManager started for bot=%s dir=%s",
+                normalized_bot_key,
+                str(working_dir),
+            )
+            return manager

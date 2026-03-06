@@ -1,5 +1,9 @@
 import { request } from "../request";
-import type { AgentRequest, AgentsRunningConfig } from "../types";
+import type {
+  AgentRequest,
+  AgentsRunningConfig,
+  BotProfilesConfig,
+} from "../types";
 
 // Agent API
 export const agentApi = {
@@ -30,6 +34,14 @@ export const agentApi = {
 
   updateAgentRunningConfig: (config: AgentsRunningConfig) =>
     request<AgentsRunningConfig>("/agent/running-config", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+
+  getBotProfilesConfig: () => request<BotProfilesConfig>("/agent/bot-profiles"),
+
+  updateBotProfilesConfig: (config: BotProfilesConfig) =>
+    request<BotProfilesConfig>("/agent/bot-profiles", {
       method: "PUT",
       body: JSON.stringify(config),
     }),

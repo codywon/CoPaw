@@ -477,32 +477,20 @@ class SkillService:
         Returns:
             List of SkillInfo with name, content, source, and path.
         """
-        try:
-            synced, _ = sync_skills_from_active_to_customized()
-            if synced > 0:
-                logger.debug(
-                    "Synced %d skill(s) from active_skills to "
-                    "customized_skills",
-                    synced,
-                )
-        except Exception as e:
-            logger.debug(
-                "Failed to sync skills from active_skills to "
-                "customized_skills: %s",
-                e,
-            )
+        # Merge by name: customized skills override builtin skills.
+        # This avoids duplicate entries in UI/CLI and matches documented behavior.
+        merged: dict[str, SkillInfo] = {}
 
-        skills: list[SkillInfo] = []
+        for skill in _read_skills_from_dir(get_builtin_skills_dir(), "builtin"):
+            merged[skill.name] = skill
 
-        # Collect from builtin and customized skills
-        skills.extend(
-            _read_skills_from_dir(get_builtin_skills_dir(), "builtin"),
-        )
-        skills.extend(
-            _read_skills_from_dir(get_customized_skills_dir(), "customized"),
-        )
+        for skill in _read_skills_from_dir(
+            get_customized_skills_dir(),
+            "customized",
+        ):
+            merged[skill.name] = skill
 
-        return skills
+        return [merged[name] for name in sorted(merged.keys())]
 
     @staticmethod
     def list_available_skills() -> list[SkillInfo]:
@@ -736,6 +724,26 @@ class SkillService:
                 "Deleted skill '%s' from customized_skills.",
                 name,
             )
+            # Keep active_skills consistent after deleting an override:
+            # - If a builtin skill with the same name exists, restore it in active.
+            # - Otherwise remove the active skill directory.
+            active_dir = get_active_skills_dir()
+            active_skill_dir = active_dir / name
+            builtin_skill_dir = get_builtin_skills_dir() / name
+
+            if active_skill_dir.exists():
+                shutil.rmtree(active_skill_dir)
+                if builtin_skill_dir.exists():
+                    shutil.copytree(builtin_skill_dir, active_skill_dir)
+                    logger.debug(
+                        "Restored builtin skill '%s' in active_skills.",
+                        name,
+                    )
+                else:
+                    logger.debug(
+                        "Removed active skill '%s' after deleting customized.",
+                        name,
+                    )
             return True
         except Exception as e:
             logger.error(

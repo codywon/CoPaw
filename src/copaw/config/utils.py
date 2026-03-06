@@ -7,7 +7,7 @@ import plistlib
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any, Dict
 
 from ..constant import (
     HEARTBEAT_FILE,
@@ -299,6 +299,58 @@ def get_available_channels() -> Tuple[str, ...]:
         return all_keys
     enabled = tuple(ch.strip() for ch in raw.split(",") if ch.strip())
     return tuple(k for k in all_keys if k in enabled) or all_keys
+
+
+def get_channel_instances(
+    channels: Any,
+) -> Dict[str, Dict[str, Any]]:
+    """Resolve runtime channel instances from config.
+
+    Returns:
+        Mapping: runtime_instance_name -> {
+            "channel_type": <registered channel type>,
+            "config": <raw config object or dict>,
+        }
+
+    Notes:
+    - Built-in channel types are always included as instances with the same
+      key.
+    - Extra channel entries are treated as instances only when:
+      1) value is a dict
+      2) contains `channel_type`
+      3) `channel_type` exists in available channel types.
+    """
+    available = get_available_channels()
+    available_set = set(available)
+    instances: Dict[str, Dict[str, Any]] = {}
+
+    for channel_type in available:
+        cfg = channels.get_channel_config(channel_type)
+        if cfg is None:
+            continue
+        instances[channel_type] = {
+            "channel_type": channel_type,
+            "config": cfg,
+        }
+
+    extra = getattr(channels, "__pydantic_extra__", None) or {}
+    for instance_name, raw_cfg in extra.items():
+        if instance_name in instances:
+            continue
+        if not isinstance(raw_cfg, dict):
+            continue
+        raw_type = raw_cfg.get("channel_type")
+        if not isinstance(raw_type, str):
+            continue
+        channel_type = raw_type.strip().lower()
+        if not channel_type or channel_type not in available_set:
+            continue
+        instances[instance_name] = {
+            "channel_type": channel_type,
+            "config": raw_cfg,
+        }
+
+    return instances
 
 
 def is_running_in_container() -> bool:

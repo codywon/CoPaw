@@ -73,6 +73,32 @@ export interface ShowToolDetailsConfig {
   show_tool_details: boolean;
 }
 
+export interface ShowReasoningConfig {
+  show_reasoning: boolean;
+}
+
+export interface ChannelInstanceSummary {
+  key: string;
+  channel_type: string;
+  enabled: boolean;
+  bot_prefix: string;
+}
+
+export interface ChannelInstanceDetail {
+  key: string;
+  channel_type: string;
+  config: Record<string, unknown>;
+}
+
+export interface ChannelInstanceUpsertPayload {
+  channel_type: string;
+  config: Record<string, unknown>;
+}
+
+export interface DeleteResponse {
+  success: boolean;
+}
+
 export type SingleChannelConfig =
   | IMessageChannelConfig
   | DiscordConfig

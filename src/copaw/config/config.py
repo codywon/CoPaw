@@ -340,6 +340,135 @@ class SubagentsConfig(BaseModel):
         return normalized
 
 
+class BotProfileConfig(BaseModel):
+    """One runtime bot profile (one logical Agent persona)."""
+
+    key: str
+    name: str = ""
+    enabled: bool = True
+    description: str = ""
+    identity_prompt: str = ""
+
+    @field_validator("key", mode="after")
+    @classmethod
+    def normalize_key(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("bot profile key cannot be empty")
+        return normalized
+
+    @field_validator("name", mode="after")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("description", mode="after")
+    @classmethod
+    def normalize_description(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("identity_prompt", mode="after")
+    @classmethod
+    def normalize_identity_prompt(cls, value: str) -> str:
+        return value.strip()
+
+
+class BotProfilesConfig(BaseModel):
+    """Config for multi-bot profiles and channel routing."""
+
+    enabled: bool = True
+    default_bot: str = "default"
+    profiles: List[BotProfileConfig] = Field(
+        default_factory=lambda: [
+            BotProfileConfig(
+                key="default",
+                name="Default Bot",
+                enabled=True,
+            ),
+        ],
+    )
+    channel_bindings: Dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("default_bot", mode="after")
+    @classmethod
+    def normalize_default_bot(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            return "default"
+        return normalized
+
+    @field_validator("channel_bindings", mode="before")
+    @classmethod
+    def normalize_channel_bindings(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        normalized: Dict[str, str] = {}
+        for key, profile_key in value.items():
+            if not isinstance(key, str) or not isinstance(profile_key, str):
+                continue
+            channel_key = key.strip()
+            bot_key = profile_key.strip()
+            if not channel_key or not bot_key:
+                continue
+            normalized[channel_key] = bot_key
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_profiles_and_bindings(self):
+        normalized_profiles: List[BotProfileConfig] = []
+        seen_keys: set[str] = set()
+        enabled_keys: set[str] = set()
+
+        for profile in self.profiles:
+            key = profile.key.strip()
+            lower_key = key.lower()
+            if lower_key in seen_keys:
+                raise ValueError(f"duplicate bot profile key: {key}")
+            seen_keys.add(lower_key)
+            profile.key = key
+            if not profile.name:
+                profile.name = key
+            if profile.enabled:
+                enabled_keys.add(lower_key)
+            normalized_profiles.append(profile)
+
+        if not normalized_profiles:
+            normalized_profiles = [
+                BotProfileConfig(
+                    key="default",
+                    name="Default Bot",
+                    enabled=True,
+                ),
+            ]
+            seen_keys = {"default"}
+            enabled_keys = {"default"}
+
+        default_key = self.default_bot.strip()
+        default_lower = default_key.lower()
+        if default_lower not in seen_keys:
+            # Fallback to first enabled, then first profile
+            fallback = next(
+                (p.key for p in normalized_profiles if p.enabled),
+                normalized_profiles[0].key,
+            )
+            default_key = fallback
+            default_lower = default_key.lower()
+
+        if default_lower not in enabled_keys:
+            raise ValueError("default_bot must reference an enabled profile")
+
+        valid_bindings: Dict[str, str] = {}
+        for channel_key, bot_key in self.channel_bindings.items():
+            lower_bot = bot_key.lower()
+            if lower_bot in seen_keys:
+                valid_bindings[channel_key] = bot_key
+
+        self.default_bot = default_key
+        self.profiles = normalized_profiles
+        self.channel_bindings = valid_bindings
+        return self
+
+
 class AgentsConfig(BaseModel):
     defaults: AgentsDefaultsConfig = Field(
         default_factory=AgentsDefaultsConfig,
@@ -349,6 +478,9 @@ class AgentsConfig(BaseModel):
     )
     subagents: SubagentsConfig = Field(
         default_factory=SubagentsConfig,
+    )
+    bot_profiles: BotProfilesConfig = Field(
+        default_factory=BotProfilesConfig,
     )
     language: str = Field(
         default="zh",
@@ -481,6 +613,8 @@ class Config(BaseModel):
     last_dispatch: Optional[LastDispatchConfig] = None
     # When False, channel output hides tool call/result details (show "...").
     show_tool_details: bool = True
+    # When False, channel output hides model reasoning/thinking content.
+    show_reasoning: bool = True
 
 
 ChannelConfigUnion = Union[

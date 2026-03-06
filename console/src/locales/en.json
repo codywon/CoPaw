@@ -34,6 +34,7 @@
     "mcp": "MCP",
     "subagents": "Subagents",
     "agentConfig": "Configuration",
+    "botProfiles": "Bot Profiles",
     "settings": "Settings",
     "models": "Models",
     "environments": "Environments"
@@ -299,7 +300,12 @@
     "voiceSetupLink": "Open Twilio Console",
     "filterAll": "All",
     "builtin": "Built-in",
-    "custom": "Custom"
+    "custom": "Custom",
+    "showReasoning": "Show model reasoning",
+    "showReasoningDesc": "When enabled, model REASONING/thinking content is rendered in channel replies.",
+    "showReasoningSaved": "Reasoning display setting saved",
+    "showReasoningSaveFailed": "Failed to save reasoning display setting",
+    "renderVisibilityLoadFailed": "Failed to load channel render visibility settings"
   },
   "sessions": {
     "title": "Sessions",
@@ -499,6 +505,32 @@
     "saveSuccess": "Configuration saved successfully",
     "saveFailed": "Failed to save configuration",
     "loadFailed": "Failed to load configuration"
+  },
+  "botProfiles": {
+    "title": "Bot Profiles",
+    "description": "Configure one bot profile per agent persona with independent memory namespace.",
+    "notice": "Session and memory are isolated by bot profile. Channel bindings route inbound channel traffic to the selected bot profile.",
+    "loadFailed": "Failed to load bot profiles configuration",
+    "saveSuccess": "Bot profiles configuration saved",
+    "saveFailed": "Failed to save bot profiles configuration",
+    "enabled": "Enable Bot Profiles",
+    "defaultBot": "Default Bot",
+    "defaultBotRequired": "Please select a default bot profile",
+    "defaultBotPlaceholder": "Select default bot profile",
+    "profilesTitle": "Profiles",
+    "addProfile": "Add Profile",
+    "atLeastOneProfile": "At least one bot profile is required",
+    "profileKey": "Profile Key",
+    "profileKeyRequired": "Profile key is required",
+    "profileKeyPlaceholder": "e.g. sales_bot",
+    "profileName": "Profile Name",
+    "profileNameRequired": "Profile name is required",
+    "profileNamePlaceholder": "e.g. Sales Assistant",
+    "profileEnabled": "Enabled",
+    "profileDescription": "Description",
+    "identityPrompt": "Identity Prompt",
+    "channelBindingsTitle": "Channel Bindings",
+    "unbound": "Unbound (uses default bot)"
   },
   "subagents": {
     "title": "Subagents",

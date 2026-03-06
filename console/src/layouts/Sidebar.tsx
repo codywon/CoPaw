@@ -33,6 +33,7 @@ import {
   PanelLeftOpen,
   Copy,
   Check,
+  Bot,
 } from "lucide-react";
 import api from "../api";
 import styles from "./index.module.less";
@@ -61,6 +62,7 @@ const KEY_TO_PATH: Record<string, string> = {
   models: "/models",
   environments: "/environments",
   "agent-config": "/agent-config",
+  "bot-profiles": "/bot-profiles",
 };
 
 const UPDATE_MD: Record<string, string> = {
@@ -292,6 +294,11 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           key: "agent-config",
           label: t("nav.agentConfig"),
           icon: <Settings size={16} />,
+        },
+        {
+          key: "bot-profiles",
+          label: t("nav.botProfiles"),
+          icon: <Bot size={16} />,
         },
       ],
     },

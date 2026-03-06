@@ -3,7 +3,7 @@ import {
   IAgentScopeRuntimeWebUIOptions,
 } from "@agentscope-ai/chat";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Button, Result } from "antd";
+import { Modal, Button, Result, Select } from "antd";
 import { ExclamationCircleOutlined, SettingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -21,11 +21,17 @@ interface CustomWindow extends Window {
   currentSessionId?: string;
   currentUserId?: string;
   currentChannel?: string;
+  currentBotId?: string;
 }
 
 declare const window: CustomWindow;
 
 type OptionsConfig = DefaultConfig;
+type BotOption = {
+  key: string;
+  name: string;
+  enabled: boolean;
+};
 
 const TOOL_PROCESS_MESSAGE_TYPES = new Set([
   "plugin_call",
@@ -112,6 +118,10 @@ export default function ChatPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [showModelPrompt, setShowModelPrompt] = useState(false);
+  const [botOptions, setBotOptions] = useState<BotOption[]>([]);
+  const [selectedBotId, setSelectedBotId] = useState<string>(() => {
+    return localStorage.getItem("copaw:selected-bot-id") || "default";
+  });
   const showToolDetailsRef = useRef(true);
   const hiddenToolMessageIdsRef = useRef<Set<string>>(new Set());
   const [optionsConfig] = useLocalStorageState<OptionsConfig>(
@@ -164,6 +174,41 @@ export default function ChatPage() {
     };
   }, []);
 
+  useEffect(() => {
+    window.currentBotId = selectedBotId;
+    localStorage.setItem("copaw:selected-bot-id", selectedBotId);
+  }, [selectedBotId]);
+
+  useEffect(() => {
+    const syncBotProfiles = async () => {
+      try {
+        const config = await api.getBotProfilesConfig();
+        const options = (config.profiles || [])
+          .filter((profile) => profile.key)
+          .map((profile) => ({
+            key: profile.key,
+            name: profile.name || profile.key,
+            enabled: profile.enabled,
+          }));
+        setBotOptions(options);
+
+        const selectedExists = options.some((item) => item.key === selectedBotId);
+        if (!selectedExists) {
+          const fallback =
+            options.find((item) => item.enabled)?.key ||
+            config.default_bot ||
+            "default";
+          setSelectedBotId(fallback);
+        }
+      } catch (error) {
+        console.error("Failed to load bot profiles:", error);
+      }
+    };
+
+    void syncBotProfiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const options = useMemo(() => {
     const handleModelError = () => {
       setShowModelPrompt(true);
@@ -208,12 +253,15 @@ export default function ChatPage() {
       const session_id = window.currentSessionId || session?.session_id || "";
       const user_id = window.currentUserId || session?.user_id || "default";
       const channel = window.currentChannel || session?.channel || "console";
+      const bot_id = window.currentBotId || selectedBotId || "default";
+      window.currentBotId = bot_id;
 
       const requestBody = {
         input: input.slice(-1),
         session_id,
         user_id,
         channel,
+        bot_id,
         stream: true,
         ...biz_params,
       };
@@ -264,10 +312,35 @@ export default function ChatPage() {
         "weather search mock": Weather,
       },
     } as unknown as IAgentScopeRuntimeWebUIOptions;
-  }, [optionsConfig]);
+  }, [optionsConfig, selectedBotId]);
 
   return (
     <div style={{ height: "100%", width: "100%" }}>
+      <div
+        style={{
+          position: "absolute",
+          top: 12,
+          right: 16,
+          zIndex: 11,
+          background: "rgba(255,255,255,0.92)",
+          padding: "8px 10px",
+          borderRadius: 10,
+          border: "1px solid #f0f0f0",
+          backdropFilter: "blur(4px)",
+        }}
+      >
+        <Select
+          size="small"
+          value={selectedBotId}
+          style={{ minWidth: 220 }}
+          options={botOptions.map((item) => ({
+            value: item.key,
+            label: `${item.name} (${item.key})${item.enabled ? "" : " [off]"}`,
+          }))}
+          onChange={(value) => setSelectedBotId(value)}
+        />
+      </div>
+
       <AgentScopeRuntimeWebUI options={options} />
 
       <Modal open={showModelPrompt} closable={false} footer={null} width={480}>

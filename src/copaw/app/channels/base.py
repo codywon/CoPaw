@@ -80,14 +80,19 @@ class BaseChannel(ABC):
         process: ProcessHandler,
         on_reply_sent: OnReplySent = None,
         show_tool_details: bool = True,
+        show_reasoning: bool = True,
     ):
         self._process = process
         self._on_reply_sent = on_reply_sent
         self._show_tool_details = show_tool_details
+        self._show_reasoning = show_reasoning
         # Set by ChannelManager.start_all(); channel calls this to enqueue.
         self._enqueue: EnqueueCallback = None
         # Pluggable renderer; subclasses may replace or inject style.
-        self._render_style = RenderStyle(show_tool_details=show_tool_details)
+        self._render_style = RenderStyle(
+            show_tool_details=show_tool_details,
+            show_reasoning=show_reasoning,
+        )
         self._renderer = MessageRenderer(self._render_style)
         # Optional shared aiohttp.ClientSession; subclasses create in start(),
         # close in stop().
@@ -256,6 +261,7 @@ class BaseChannel(ABC):
         config: Any,
         on_reply_sent: OnReplySent = None,
         show_tool_details: bool = True,
+        show_reasoning: bool = True,
     ) -> "BaseChannel":
         raise NotImplementedError
 
@@ -691,7 +697,12 @@ class BaseChannel(ABC):
                 parts.append(c.refusal)
         return "".join(parts)
 
-    def clone(self, config, show_tool_details: bool | None = None) -> "BaseChannel":
+    def clone(
+        self,
+        config,
+        show_tool_details: bool | None = None,
+        show_reasoning: bool | None = None,
+    ) -> "BaseChannel":
         """Clone a new channel instance with updated config, cloning
         process and on_reply_sent from self.
 
@@ -702,11 +713,17 @@ class BaseChannel(ABC):
             if show_tool_details is None
             else show_tool_details
         )
+        resolved_show_reasoning = (
+            self._show_reasoning
+            if show_reasoning is None
+            else show_reasoning
+        )
         return self.__class__.from_config(
             process=self._process,
             config=config,
             on_reply_sent=self._on_reply_sent,
             show_tool_details=resolved_show_tool_details,
+            show_reasoning=resolved_show_reasoning,
         )
 
     async def start(self) -> None:

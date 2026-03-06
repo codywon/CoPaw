@@ -8,6 +8,7 @@ from ...config import (
     load_config,
     save_config,
     AgentsRunningConfig,
+    BotProfilesConfig,
 )
 
 from ...agents.memory.agent_md_manager import AGENT_MD_MANAGER
@@ -170,3 +171,34 @@ async def put_agents_running_config(
     config.agents.running = running_config
     save_config(config)
     return running_config
+
+
+@router.get(
+    "/bot-profiles",
+    response_model=BotProfilesConfig,
+    summary="Get bot profiles config",
+    description="Retrieve runtime bot profiles and channel bindings",
+)
+async def get_bot_profiles_config() -> BotProfilesConfig:
+    """Get bot profiles configuration."""
+    config = load_config()
+    return config.agents.bot_profiles
+
+
+@router.put(
+    "/bot-profiles",
+    response_model=BotProfilesConfig,
+    summary="Update bot profiles config",
+    description="Update runtime bot profiles and channel bindings",
+)
+async def put_bot_profiles_config(
+    bot_profiles_config: BotProfilesConfig = Body(
+        ...,
+        description="Updated bot profiles configuration",
+    ),
+) -> BotProfilesConfig:
+    """Update bot profiles configuration."""
+    config = load_config()
+    config.agents.bot_profiles = bot_profiles_config
+    save_config(config)
+    return bot_profiles_config

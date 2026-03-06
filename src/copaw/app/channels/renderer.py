@@ -39,6 +39,7 @@ class RenderStyle:
     """Channel capabilities for rendering (no hardcoded markdown/emoji)."""
 
     show_tool_details: bool = True
+    show_reasoning: bool = True
     supports_markdown: bool = True
     supports_code_fence: bool = True
     use_emoji: bool = True
@@ -159,7 +160,7 @@ class MessageRenderer:
                                 ),
                             )
                 if btype == "thinking" and b.get("thinking"):
-                    if not s.filter_thinking:
+                    if s.show_reasoning and not s.filter_thinking:
                         result.append(TextContent(text=b["thinking"]))
             return result
 
@@ -257,6 +258,9 @@ class MessageRenderer:
                     return []
                 parts = [TextContent(text=f"[{msg_type}]")]
             return parts
+
+        if msg_type == MessageType.REASONING and not s.show_reasoning:
+            return []
 
         result: List[_OutgoingPart] = []
         for c in content:

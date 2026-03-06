@@ -1,0 +1,106 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.description {
+  margin: 8px 0 0;
+  color: #666;
+}
+
+.notice {
+  margin-bottom: 4px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  border-radius: 10px;
+}
+
+.inlineRow {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(320px, 520px);
+  gap: 16px;
+}
+
+.compactItem {
+  margin-bottom: 0;
+}
+
+.profileCard {
+  border-radius: 8px;
+}
+
+.profileGrid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) 120px;
+  gap: 12px;
+}
+
+.bindingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.channelLabel {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  color: #444;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.centerState {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.stateText {
+  color: #666;
+}
+
+.stateTextError {
+  color: #ff4d4f;
+}
+
+@media (max-width: 1100px) {
+  .inlineRow,
+  .profileGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .bindingRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

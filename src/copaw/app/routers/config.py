@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 
+from typing import List, Dict, Any
+
 import logging
 from typing import Any, List
 
 from fastapi import APIRouter, Body, HTTPException, Path, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from ...config import (
     load_config,
     save_config,
@@ -17,6 +19,7 @@ from ..channels.registry import BUILTIN_CHANNEL_KEYS
 from ...config.config import HeartbeatConfig
 
 from .schemas_config import HeartbeatBody
+from ...config.utils import get_channel_instances
 
 router = APIRouter(prefix="/config", tags=["config"])
 logger = logging.getLogger(__name__)
@@ -26,6 +29,34 @@ class ShowToolDetailsConfig(BaseModel):
     """Global channel rendering option for tool call details."""
 
     show_tool_details: bool = True
+
+
+class ShowReasoningConfig(BaseModel):
+    """Global channel rendering option for model reasoning output."""
+
+    show_reasoning: bool = True
+
+
+class ChannelInstanceSummary(BaseModel):
+    key: str
+    channel_type: str
+    enabled: bool
+    bot_prefix: str = ""
+
+
+class ChannelInstanceDetail(BaseModel):
+    key: str
+    channel_type: str
+    config: Dict[str, Any]
+
+
+class ChannelInstanceUpsertPayload(BaseModel):
+    channel_type: str
+    config: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DeleteResponse(BaseModel):
+    success: bool = True
 
 
 @router.get(
@@ -70,6 +101,173 @@ async def list_channels() -> dict:
 async def list_channel_types() -> List[str]:
     """Return available channel type identifiers (env-filtered)."""
     return list(get_available_channels())
+
+
+@router.get(
+    "/channels/instances",
+    response_model=List[ChannelInstanceSummary],
+    summary="List channel instances",
+    description="Return runtime channel instances resolved from config",
+)
+async def list_channel_instances() -> List[ChannelInstanceSummary]:
+    """Return channel runtime instances (name -> channel_type/config)."""
+    config = load_config()
+    instances = get_channel_instances(config.channels)
+    result: List[ChannelInstanceSummary] = []
+
+    for key, entry in instances.items():
+        channel_type = str(entry.get("channel_type") or "").strip()
+        cfg = entry.get("config")
+        if isinstance(cfg, dict):
+            enabled = bool(cfg.get("enabled", False))
+            bot_prefix = str(cfg.get("bot_prefix") or "")
+        else:
+            enabled = bool(getattr(cfg, "enabled", False))
+            bot_prefix = str(getattr(cfg, "bot_prefix", "") or "")
+        result.append(
+            ChannelInstanceSummary(
+                key=key,
+                channel_type=channel_type,
+                enabled=enabled,
+                bot_prefix=bot_prefix,
+            ),
+        )
+    return result
+
+
+@router.get(
+    "/channels/instances/{instance_name}",
+    response_model=ChannelInstanceDetail,
+    summary="Get channel instance",
+    description="Get one custom channel instance by name",
+)
+async def get_channel_instance(
+    instance_name: str = Path(
+        ...,
+        description="Runtime channel instance name",
+        min_length=1,
+    ),
+) -> ChannelInstanceDetail:
+    """Return one custom channel instance (non built-in channel type)."""
+    available = set(get_available_channels())
+    if instance_name in available:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{instance_name}' is a built-in channel type, not instance",
+        )
+
+    config = load_config()
+    entry = get_channel_instances(config.channels).get(instance_name)
+    if entry is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Channel instance '{instance_name}' not found",
+        )
+
+    raw_cfg = entry.get("config")
+    cfg = (
+        dict(raw_cfg)
+        if isinstance(raw_cfg, dict)
+        else raw_cfg.model_dump(mode="json")
+        if hasattr(raw_cfg, "model_dump")
+        else {}
+    )
+
+    return ChannelInstanceDetail(
+        key=instance_name,
+        channel_type=str(entry.get("channel_type") or "").strip(),
+        config=cfg,
+    )
+
+
+@router.put(
+    "/channels/instances/{instance_name}",
+    response_model=ChannelInstanceDetail,
+    summary="Upsert channel instance",
+    description="Create or update one custom channel instance",
+)
+async def put_channel_instance(
+    instance_name: str = Path(
+        ...,
+        description="Runtime channel instance name",
+        min_length=1,
+    ),
+    payload: ChannelInstanceUpsertPayload = Body(
+        ...,
+        description="Channel instance payload",
+    ),
+) -> ChannelInstanceDetail:
+    """Create/update one custom channel instance."""
+    available = set(get_available_channels())
+    if instance_name in available:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"'{instance_name}' conflicts with built-in channel type "
+                "and cannot be used as instance key"
+            ),
+        )
+
+    channel_type = payload.channel_type.strip().lower()
+    if not channel_type or channel_type not in available:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"channel_type must be one of: {', '.join(sorted(available))}"
+            ),
+        )
+
+    config = load_config()
+    channels_data = config.channels.model_dump(mode="json")
+    instance_cfg = dict(payload.config or {})
+    instance_cfg.pop("channel_type", None)
+    instance_cfg["channel_type"] = channel_type
+    channels_data[instance_name] = instance_cfg
+
+    config.channels = ChannelConfig.model_validate(channels_data)
+    save_config(config)
+
+    return ChannelInstanceDetail(
+        key=instance_name,
+        channel_type=channel_type,
+        config=instance_cfg,
+    )
+
+
+@router.delete(
+    "/channels/instances/{instance_name}",
+    response_model=DeleteResponse,
+    summary="Delete channel instance",
+    description="Delete one custom channel instance",
+)
+async def delete_channel_instance(
+    instance_name: str = Path(
+        ...,
+        description="Runtime channel instance name",
+        min_length=1,
+    ),
+) -> DeleteResponse:
+    """Delete one custom channel instance."""
+    available = set(get_available_channels())
+    if instance_name in available:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{instance_name}' is a built-in channel type and cannot be deleted",
+        )
+
+    config = load_config()
+    channels_data = config.channels.model_dump(mode="json")
+    raw = channels_data.get(instance_name)
+    if not isinstance(raw, dict) or not str(raw.get("channel_type") or "").strip():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Channel instance '{instance_name}' not found",
+        )
+
+    del channels_data[instance_name]
+    config.channels = ChannelConfig.model_validate(channels_data)
+    save_config(config)
+    return DeleteResponse(success=True)
 
 
 @router.put(
@@ -189,9 +387,53 @@ async def put_show_tool_details(
         await channel_manager.apply_show_tool_details(
             config.channels,
             config.show_tool_details,
+            config.show_reasoning,
         )
 
     return ShowToolDetailsConfig(show_tool_details=config.show_tool_details)
+
+
+@router.get(
+    "/show-reasoning",
+    response_model=ShowReasoningConfig,
+    summary="Get reasoning render config",
+    description="Return whether model reasoning output is shown in channels",
+)
+async def get_show_reasoning() -> ShowReasoningConfig:
+    """Get global show_reasoning flag."""
+    config = load_config()
+    return ShowReasoningConfig(show_reasoning=config.show_reasoning)
+
+
+@router.put(
+    "/show-reasoning",
+    response_model=ShowReasoningConfig,
+    summary="Update reasoning render config",
+    description="Update whether model reasoning output is shown in channels",
+)
+async def put_show_reasoning(
+    request: Request,
+    payload: ShowReasoningConfig = Body(
+        ...,
+        description="Reasoning render configuration",
+    ),
+) -> ShowReasoningConfig:
+    """Update global show_reasoning flag."""
+    config = load_config()
+    config.show_reasoning = payload.show_reasoning
+    save_config(config)
+
+    # Apply immediately to running channels without waiting for watcher.
+    channel_manager = getattr(getattr(request, "app", None), "state", None)
+    channel_manager = getattr(channel_manager, "channel_manager", None)
+    if channel_manager is not None:
+        await channel_manager.apply_show_tool_details(
+            config.channels,
+            config.show_tool_details,
+            config.show_reasoning,
+        )
+
+    return ShowReasoningConfig(show_reasoning=config.show_reasoning)
 
 
 @router.get(

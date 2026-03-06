@@ -9,6 +9,7 @@ interface CustomWindow extends Window {
   currentSessionId?: string;
   currentUserId?: string;
   currentChannel?: string;
+  currentBotId?: string;
 }
 
 declare const window: CustomWindow;
@@ -215,6 +216,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     window.currentSessionId = sessionId;
     window.currentUserId = "default";
     window.currentChannel = "console";
+    const botId = window.currentBotId || "default";
 
     return {
       id: sessionId,
@@ -223,7 +225,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       userId: "default",
       channel: "console",
       messages: [],
-      meta: {},
+      meta: { bot_id: botId },
     } as ExtendedSession;
   }
 
@@ -231,6 +233,9 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     window.currentSessionId = session.sessionId || "";
     window.currentUserId = session.userId || "default";
     window.currentChannel = session.channel || "console";
+    const botId = (session.meta as Record<string, unknown> | undefined)?.bot_id;
+    window.currentBotId =
+      typeof botId === "string" && botId.trim() ? botId.trim() : "default";
   }
 
   private getLocalSession(sessionId: string): IAgentScopeRuntimeWebUISession {
@@ -379,6 +384,10 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       sessionId: session.id,
       userId: "default",
       channel: "console",
+      meta: {
+        ...((session as ExtendedSession).meta || {}),
+        bot_id: window.currentBotId || "default",
+      },
     } as ExtendedSession;
 
     this.updateWindowVariables(extendedSession);

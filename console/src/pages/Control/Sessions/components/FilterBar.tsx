@@ -5,17 +5,23 @@ import styles from "../index.module.less";
 interface FilterBarProps {
   filterUserId: string;
   filterChannel: string;
+  filterBotId: string;
   uniqueChannels: string[];
+  uniqueBots: string[];
   onUserIdChange: (value: string) => void;
   onChannelChange: (value: string) => void;
+  onBotChange: (value: string) => void;
 }
 
 export function FilterBar({
   filterUserId,
   filterChannel,
+  filterBotId,
   uniqueChannels,
+  uniqueBots,
   onUserIdChange,
   onChannelChange,
+  onBotChange,
 }: FilterBarProps) {
   const { t } = useTranslation();
 
@@ -40,6 +46,20 @@ export function FilterBar({
         {uniqueChannels.map((channel) => (
           <Select.Option key={channel} value={channel}>
             {channel}
+          </Select.Option>
+        ))}
+      </Select>
+      <Select
+        placeholder={t("sessions.filterBot", { defaultValue: "Bot" })}
+        value={filterBotId || undefined}
+        onChange={(value) => onBotChange(value || "")}
+        allowClear
+        className="sessions-filter-select"
+        style={{ width: 180 }}
+      >
+        {uniqueBots.map((bot) => (
+          <Select.Option key={bot} value={bot}>
+            {bot}
           </Select.Option>
         ))}
       </Select>

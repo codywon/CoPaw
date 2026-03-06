@@ -59,6 +59,16 @@ export const createColumns = (
       ),
     },
     {
+      title: t("sessions.filterBot", { defaultValue: "Bot" }),
+      key: "bot_id",
+      width: 140,
+      render: (_: unknown, record: Session) => {
+        const meta = (record.meta as Record<string, unknown> | undefined) || {};
+        const botId = String(meta.bot_id || "default").trim() || "default";
+        return <Tag color="geekblue">{botId}</Tag>;
+      },
+    },
+    {
       title: "CreatedAt",
       dataIndex: "created_at",
       key: "created_at",

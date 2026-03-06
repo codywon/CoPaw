@@ -34,6 +34,7 @@
     "mcp": "MCP",
     "subagents": "子代理",
     "agentConfig": "运行配置",
+    "botProfiles": "Bot Profiles",
     "settings": "设置",
     "models": "模型",
     "environments": "环境变量"
@@ -299,7 +300,12 @@
     "voiceSetupLink": "打开 Twilio 控制台",
     "filterAll": "全部",
     "builtin": "内置",
-    "custom": "自定义"
+    "custom": "自定义",
+    "showReasoning": "显示模型思考内容",
+    "showReasoningDesc": "开启后，频道回复会展示模型 REASONING/thinking 内容。",
+    "showReasoningSaved": "思考内容显示设置已保存",
+    "showReasoningSaveFailed": "思考内容显示设置保存失败",
+    "renderVisibilityLoadFailed": "频道渲染显示设置加载失败"
   },
   "sessions": {
     "title": "会话",
@@ -499,6 +505,32 @@
     "saveSuccess": "配置保存成功",
     "saveFailed": "配置保存失败",
     "loadFailed": "配置加载失败"
+  },
+  "botProfiles": {
+    "title": "Bot Profiles",
+    "description": "为每个智能体角色配置独立的 Bot Profile 与记忆命名空间。",
+    "notice": "会话与长期记忆将按 Bot Profile 隔离。频道绑定可将入站消息路由到指定 Bot。",
+    "loadFailed": "加载 Bot Profiles 配置失败",
+    "saveSuccess": "Bot Profiles 配置保存成功",
+    "saveFailed": "Bot Profiles 配置保存失败",
+    "enabled": "启用 Bot Profiles",
+    "defaultBot": "默认 Bot",
+    "defaultBotRequired": "请选择默认 Bot Profile",
+    "defaultBotPlaceholder": "请选择默认 Bot Profile",
+    "profilesTitle": "Profiles",
+    "addProfile": "新增 Profile",
+    "atLeastOneProfile": "至少需要 1 个 Bot Profile",
+    "profileKey": "Profile Key",
+    "profileKeyRequired": "Profile Key 不能为空",
+    "profileKeyPlaceholder": "例如 sales_bot",
+    "profileName": "Profile 名称",
+    "profileNameRequired": "Profile 名称不能为空",
+    "profileNamePlaceholder": "例如 销售助手",
+    "profileEnabled": "启用",
+    "profileDescription": "描述",
+    "identityPrompt": "Identity Prompt",
+    "channelBindingsTitle": "频道绑定",
+    "unbound": "未绑定（使用默认 Bot）"
   },
   "subagents": {
     "title": "子代理",

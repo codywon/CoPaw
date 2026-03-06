@@ -213,7 +213,7 @@ function SkillsPage() {
             })
             .map((skill) => (
               <SkillCard
-                key={skill.name}
+                key={`${skill.source}:${skill.name}:${skill.path}`}
                 skill={skill}
                 isHover={hoverKey === skill.name}
                 onClick={() => handleEdit(skill)}

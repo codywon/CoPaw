@@ -90,3 +90,35 @@ async def test_execute_shell_command_decodes_utf8_stderr_when_command_fails(
     assert "Command failed with exit code 2." in text
     assert "[stderr]" in text
     assert stderr_text in text
+
+
+@pytest.mark.asyncio
+async def test_execute_shell_command_uses_env_default_timeout_when_not_provided(
+    monkeypatch,
+):
+    fake_proc = _FakeProcess(stdout=b"ok")
+    captured_timeout = {}
+
+    async def _fake_create_subprocess_shell(*_args, **_kwargs):
+        return fake_proc
+
+    async def _fake_wait_for(awaitable, timeout):
+        captured_timeout["value"] = timeout
+        return await awaitable
+
+    monkeypatch.setenv("COPAW_SHELL_TIMEOUT_SECONDS", "777")
+    monkeypatch.setattr(
+        shell_module.asyncio,
+        "create_subprocess_shell",
+        _fake_create_subprocess_shell,
+    )
+    monkeypatch.setattr(shell_module.asyncio, "wait_for", _fake_wait_for)
+
+    resp = await shell_module.execute_shell_command(
+        "echo ignored",
+        timeout=None,
+        cwd=Path("."),
+    )
+
+    assert captured_timeout["value"] == 777
+    assert _response_text(resp) == "ok"

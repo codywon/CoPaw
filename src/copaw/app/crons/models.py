@@ -62,7 +62,7 @@ class DispatchSpec(BaseModel):
 
 class JobRuntimeSpec(BaseModel):
     max_concurrency: int = Field(default=1, ge=1)
-    timeout_seconds: int = Field(default=120, ge=1)
+    timeout_seconds: int = Field(default=600, ge=1)
     misfire_grace_seconds: int = Field(default=60, ge=0)
 
 

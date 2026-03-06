@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import {
   Card,
   Form,
@@ -17,6 +17,12 @@ import {
 import { useSessions } from "./useSessions";
 import api from "../../../api";
 import styles from "./index.module.less";
+
+const getSessionBotId = (session: Session): string => {
+  const meta = (session.meta as Record<string, unknown> | undefined) || {};
+  const raw = String(meta.bot_id || "default").trim();
+  return raw || "default";
+};
 
 function SessionsPage() {
   const { t } = useTranslation();
@@ -37,22 +43,39 @@ function SessionsPage() {
   // Filter states
   const [filterUserId, setFilterUserId] = useState<string>("");
   const [filterChannel, setFilterChannel] = useState<string>("");
+  const [filterBotId, setFilterBotId] = useState<string>("");
   const [availableChannels, setAvailableChannels] = useState<string[]>([]);
+  const [availableBots, setAvailableBots] = useState<string[]>([]);
 
   useEffect(() => {
-    const fetchChannelTypes = async () => {
+    const fetchChannelOptions = async () => {
       try {
-        const types = await api.listChannelTypes();
-        setAvailableChannels(types);
+        const [instances, types] = await Promise.all([
+          api.listChannelInstances(),
+          api.listChannelTypes(),
+        ]);
+        const instanceKeys = instances.map((item) => item.key);
+        setAvailableChannels(Array.from(new Set([...instanceKeys, ...types])));
       } catch (error) {
-        console.error("❌ Failed to load channel types:", error);
+        console.error("Failed to load channel options:", error);
+        try {
+          const types = await api.listChannelTypes();
+          setAvailableChannels(types);
+        } catch (fallbackError) {
+          console.error("Failed to load fallback channel types:", fallbackError);
+        }
       }
     };
-    fetchChannelTypes();
+    fetchChannelOptions();
   }, []);
 
   // Filter effect
   useEffect(() => {
+    const botOptions = Array.from(
+      new Set(sessions.map((session) => getSessionBotId(session))),
+    ).sort();
+    setAvailableBots(botOptions);
+
     let filtered: Session[] = sessions;
 
     if (filterUserId) {
@@ -68,8 +91,14 @@ function SessionsPage() {
       );
     }
 
+    if (filterBotId) {
+      filtered = filtered.filter(
+        (session: Session) => getSessionBotId(session) === filterBotId,
+      );
+    }
+
     setFilteredSessions(filtered);
-  }, [sessions, filterUserId, filterChannel]);
+  }, [sessions, filterUserId, filterChannel, filterBotId]);
 
   const handleEdit = (session: Session) => {
     setEditingSession(session);
@@ -162,9 +191,12 @@ function SessionsPage() {
         <FilterBar
           filterUserId={filterUserId}
           filterChannel={filterChannel}
+          filterBotId={filterBotId}
           uniqueChannels={availableChannels}
+          uniqueBots={availableBots}
           onUserIdChange={setFilterUserId}
           onChannelChange={setFilterChannel}
+          onBotChange={setFilterBotId}
         />
       </div>
 

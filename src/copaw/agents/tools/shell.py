@@ -5,6 +5,7 @@
 
 import asyncio
 import locale
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -12,6 +13,9 @@ from agentscope.tool import ToolResponse
 from agentscope.message import TextBlock
 
 from copaw.constant import WORKING_DIR
+
+DEFAULT_SHELL_TIMEOUT_SECONDS = 600
+SHELL_TIMEOUT_ENV_KEY = "COPAW_SHELL_TIMEOUT_SECONDS"
 
 
 def _decode_subprocess_stream(data: bytes) -> str:
@@ -45,10 +49,29 @@ def _decode_subprocess_stream(data: bytes) -> str:
     return data.decode(fallback, errors="replace")
 
 
+def _resolve_timeout_seconds(timeout: Optional[int]) -> int:
+    """Resolve command timeout with env fallback and safe defaults."""
+    if timeout is not None:
+        try:
+            return max(1, int(timeout))
+        except (TypeError, ValueError):
+            return DEFAULT_SHELL_TIMEOUT_SECONDS
+
+    raw = os.environ.get(
+        SHELL_TIMEOUT_ENV_KEY,
+        str(DEFAULT_SHELL_TIMEOUT_SECONDS),
+    )
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_SHELL_TIMEOUT_SECONDS
+    return parsed if parsed >= 1 else DEFAULT_SHELL_TIMEOUT_SECONDS
+
+
 # pylint: disable=too-many-branches
 async def execute_shell_command(
     command: str,
-    timeout: int = 60,
+    timeout: Optional[int] = None,
     cwd: Optional[Path] = None,
 ) -> ToolResponse:
     """Execute given command and return the return code, standard output and
@@ -58,9 +81,10 @@ async def execute_shell_command(
     Args:
         command (`str`):
             The shell command to execute.
-        timeout (`int`, defaults to `10`):
+        timeout (`Optional[int]`, defaults to `None`):
             The maximum time (in seconds) allowed for the command to run.
-            Default is 60 seconds.
+            If not provided, uses environment variable
+            COPAW_SHELL_TIMEOUT_SECONDS (default: 600).
         cwd (`Optional[Path]`, defaults to `None`):
             The working directory for the command execution.
             If None, defaults to WORKING_DIR.
@@ -73,6 +97,7 @@ async def execute_shell_command(
     """
 
     cmd = (command or "").strip()
+    resolved_timeout = _resolve_timeout_seconds(timeout)
 
     # Set working directory
     working_dir = cwd if cwd is not None else WORKING_DIR
@@ -87,7 +112,7 @@ async def execute_shell_command(
         )
 
         try:
-            await asyncio.wait_for(proc.wait(), timeout=timeout)
+            await asyncio.wait_for(proc.wait(), timeout=resolved_timeout)
             stdout, stderr = await proc.communicate()
             stdout_str = _decode_subprocess_stream(stdout).strip("\n")
             stderr_str = _decode_subprocess_stream(stderr).strip("\n")
@@ -97,7 +122,7 @@ async def execute_shell_command(
             # Handle timeout
             stderr_suffix = (
                 f"⚠️ TimeoutError: The command execution exceeded "
-                f"the timeout of {timeout} seconds. "
+                f"the timeout of {resolved_timeout} seconds. "
                 f"Please consider increasing the timeout value if this command "
                 f"requires more time to complete."
             )

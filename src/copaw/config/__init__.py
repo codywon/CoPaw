@@ -4,6 +4,8 @@ from .config import (
     ChannelConfig,
     ChannelConfigUnion,
     AgentsRunningConfig,
+    BotProfileConfig,
+    BotProfilesConfig,
     SubagentRoleConfig,
     SubagentsConfig,
     HeartbeatConfig,
@@ -25,6 +27,8 @@ from .utils import (
 # pylint: disable=undefined-all-variable
 __all__ = [
     "AgentsRunningConfig",
+    "BotProfileConfig",
+    "BotProfilesConfig",
     "SubagentRoleConfig",
     "SubagentsConfig",
     "Config",
